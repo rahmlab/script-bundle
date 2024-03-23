@@ -1,0 +1,155 @@
+#!/bin/bash
+
+RJF=/cephyr/users/$USER/Vera/bin/QueueHistory/RunningJobs.txt
+TMPID=/cephyr/users/$USER/Vera/bin/QueueHistory/TMPID.tmp
+
+NoUpdate=0
+
+CheckCompleted (){
+	detected=0
+	oldestdate=$(awk 'FNR==1{print $3}' $RJF)
+	if [ $oldestdate ]; then
+		sacct -X -S $oldestdate -o JobID,State,End -n | awk '{print $1,$2,$3}' > $TMPID
+	fi
+	for CurrJobID in $(awk '{print $1}' $RJF); do
+		i=$(awk '/'$CurrJobID'/{print NR}' $RJF)
+		CurrJobName=$(awk 'FNR=='$i'{print $2}' $RJF)
+		CurrJobDate==$(awk 'FNR=='$i'{print $3}' $RJF)
+		CurrJobPath=$(awk 'FNR=='$i'{print $4}' $RJF)
+		if [ -s $TMPID ] && [ "$(grep "$CurrJobID" $TMPID)" ]; then
+			CurrJobStatus=$(awk '/'$CurrJobID'/{print $2}' $TMPID)
+		else
+			printf "\nWarning: $CurrJobName not found in sacct. Cannot be added to history\n\n"
+			continue
+		fi 
+		if [ $detected -eq 0 ]; then
+			if [ $CurrJobStatus != "RUNNING" ]; then
+				printf "\n"
+				detected=1
+			fi
+		fi
+		if [ $CurrJobStatus != "RUNNING" ]; then
+		case $CurrJobStatus in
+			COMPLETED)
+				sed -i "${i}d" $RJF
+				EndTime=$(cat $TMPID | awk /''$CurrJobID'/{print $3}')
+				printf ">> COMPLETED\t"
+				;;
+			CANCELLED+)
+				sed -i "${i}d" $RJF
+				EndTime=$(cat $TMPID | awk /''$CurrJobID'/{print $3}')
+                                printf ">> CANCELLED\t"
+                                ;;
+			TIMEOUT)
+				sed -i "${i}d" $RJF
+				EndTime=$(cat $TMPID | awk /''$CurrJobID'/{print $3}')
+                                printf "!! TIMEOUT\t"
+                                ;;
+			FAILED)
+                                sed -i "${i}d" $RJF
+				EndTime=$(cat $TMPID | awk /''$CurrJobID'/{print $3}')
+                                printf "!! FAILED !!\t"
+                                ;;
+		   	OUT_OF_ME+)
+                                sed -i "${i}d" $RJF
+				EndTime=$(cat $TMPID | awk /''$CurrJobID'/{print $3}')
+                                printf "!! OUT OF MEMORY !!\t"
+                                ;;
+		esac
+		printf "$CurrJobID\tat $EndTime\n\t$CurrJobName"
+		Nchar=${#CurrJobName}
+                NTabs=$(echo $"6 - ($Nchar/8)" | bc)
+                for tabs in $(seq 1 $NTabs); do printf "\t"; done
+		printf "  $CurrJobPath\n"
+		fi
+	done
+	if [ $detected -eq 1 ]; then
+		printf "\n"
+	fi
+
+	if [ -e $TMPID ]; then
+		rm $TMPID
+	fi
+
+	if [ "$(grep -v "^[0-9][0-9][0-9][0-9][0-9][0-9][0-9]" $RJF)" ]; then
+		echo "WARNING: delete the following line(s) from $RJF:"
+		grep -v "^[0-9][0-9][0-9][0-9][0-9][0-9][0-9]" $RJF
+	fi
+
+}
+
+
+NRunningJobs=$(squeue --me -h | awk 'END{print NR}')
+
+if [ $1 ] && [ $1 == "-r" ]; then
+	if [ $NRunningJobs -eq 0 ]; then
+		printf "No running jobs at $(date '+%Y-%m-%dT%H:%M:%S')\n\n"
+	else
+		printf "Running jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
+		awk '{printf "%-8s %-50s %-1s\n", $1,$2,$4}' $RJF
+		echo ""
+		exit
+	fi
+elif [ $1 ] && [ $1 == "-n" ]; then
+	NoUpdate=1
+elif [ $1 ]  && [ $1 == "-h" ]; then
+	printf "\nssq - check Vera calculations. Options:\n\n"
+	printf "\t[none]:\tPrint your queue\n"
+	printf "\t-r\tPrint running jobs folder\n"
+	printf "\t-n\tPrint queue but do not update the history of running jobs. Finished jobs are kept in memory.\n\n"
+	exit
+fi
+
+
+col=$(stty size | cut -d" " -f2)
+
+if [ $col -ge 123 ]; then
+	Nspaces=123
+elif [ $col -ge 90 ]; then
+	Nspaces=90
+elif [ $col -ge 81 ]; then
+	Nspaces=81
+else
+	Nspaces=64
+fi
+
+
+if [ -z $NRunningJobs ]; then
+	NRunningJobs=0
+fi
+
+if [ $NRunningJobs -gt 0 ]; then
+
+echo "$NRunningJobs running jobs at $(date '+%Y-%m-%dT%H:%M:%S'):"
+for i in $(seq 1 $Nspaces); do
+	printf "-"
+done
+printf "\n"
+
+
+if [ $col -ge 123 ]; then
+        squeue --me -o "%.8A %.50j %.5P %.5T %.16S %.10M %.10l %.4C %.7m"
+elif [ $col -ge 90 ]; then
+        squeue --me -o "%.8A %.25j %.5P %.5T %.16S %.10M %.10l %.4C"
+elif [ $col -ge 81 ]; then
+	squeue --me -o "%.8A %.22j %.5P %.4T %.16S %.10M %.10l"
+else
+	squeue --me -o "%.8A %.18j %.3P %.4T %.16S %.10M"
+fi
+
+for i in $(seq 1 $Nspaces); do
+        printf "-"
+done
+printf "\n"
+
+else
+	echo "No running jobs"
+
+fi
+
+if [ $NoUpdate -eq 0 ]; then
+	CheckCompleted
+else
+	printf "No update requested (-n). Finished jobs are not displayed, but still in memory.\n"
+fi
+
