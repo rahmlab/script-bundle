@@ -1,0 +1,22 @@
+if [ $part == "veralux" ] ; then
+        module load GCC/9.3.0
+        module load OpenMPI/4.0.3
+else
+        module load GCC/11.2.0 OpenMPI/4.1.1
+fi
+
+export scratchlocation=$TMPDIR/
+
+if [ "$(grep -i "xyzfile" $SLURM_JOB_NAME.inp)" ]; then
+	xyzfile=$(awk 'BEGIN{IGNORECASE=1}/xyzfile/{print $5}' $SLURM_JOB_NAME.inp)
+	cp $xyzfile $TMPDIR
+fi
+
+cp $SLURM_JOB_NAME.inp $TMPDIR 
+
+cd $TMPDIR
+
+/cephyr/NOBACKUP/groups/snic2020-6-11/rahmma/software/orca_5_0_3_linux_x86-64_shared_openmpi411/orca $SLURM_JOB_NAME.inp > $SLURM_JOB_NAME.out
+
+cp $SLURM_JOB_NAME.out $SLURM_SUBMIT_DIR
+

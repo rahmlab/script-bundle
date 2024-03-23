@@ -1,0 +1,30 @@
+ulimit -s hard
+
+#cp * $TMPDIR
+#cd $TMPDIR
+
+module purge
+
+source /cephyr/users/marcocap/Vera/venv/bin/activate
+module load GCC/11.3.0 Python/3.10.4-GCCcore-11.3.0 SciPy-bundle/2022.05-foss-2022a\
+        matplotlib/3.5.2-foss-2022a ASE/3.22.1-foss-2022a GPAW/22.8.0-foss-2022a
+
+#Load modules
+module use /cephyr/NOBACKUP/priv/c3-vasp-rahmlab/Vera/modules/all
+module load VASP/6.4.1-intel-2022a
+module load gaussian/16.B.01-AVX2
+export GAUSS_SCRDIR=$TMPDIR/
+
+export PATH=/cephyr/NOBACKUP/groups/snic2020-6-11/rahmma/software/orca_5_0_3_linux_x86-64_shared_openmpi411/:$PATH
+export LD_LIBRARY_PATH=/cephyr/NOBACKUP/groups/snic2020-6-11/rahmma/software/orca_5_0_3_linux_x86-64_shared_openmpi411/:$LD_LIBRARY_PATH
+export VASP_PP_PATH=/cephyr/NOBACKUP/groups/snic2020-6-11/rahmma/software/vasp_pp/:$VASP_PP_PATH
+
+# Make ase able to run vasp, orca and g16
+export ASE_VASP_COMMAND="mpirun vasp_std"
+export ASE_ORCA_COMMAND="orca"
+export ASE_GAUSSIAN_COMMAND="g16"
+
+
+python $SLURM_JOB_NAME.py ARGUMENT
+
+#cp * $SLURM_SUBMIT_DIR

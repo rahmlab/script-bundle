@@ -1,0 +1,17 @@
+export jobin=$SLURM_JOB_NAME
+
+
+
+#Load XTB
+source /cephyr/NOBACKUP/groups/snic2020-6-11/ruizf/xtb/xtb_current/share/xtb/config_env.bash
+
+#Configure AutoDE
+ulimit -s unlimited
+export OMP_STACKSIZE=4G
+export OMP_NUM_THREADS=JBCORES,1
+export OMP_MAX_ACTIVE_LEVELS=1
+
+cd $SLURM_SUBMIT_DIR
+
+crest $jobin.xyz ARGUMENT
+
