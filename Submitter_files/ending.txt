@@ -1,0 +1,18 @@
+
+echo ""
+
+CompTimes=$(echo "scale=2;( $(date +%s.%N) - $StartTime ) / 1" | bc -l)
+
+if (( $(echo "$CompTimes < 60" | bc -l) )); then
+	printf ">>>>>>>>>>>> Calculation ended at $(date): $CompTimes seconds\n"
+elif (( $(echo "$CompTimes < 3600" | bc -l) )); then
+	CompTimem=$(echo "$CompTimes / 60" | bc)
+	CompTimes=$(echo "$CompTimes % 60" | bc)
+	printf ">>>>>>>>>>>> Calculation ended at $(date): $CompTimem minutes and $CompTimes seconds\n"
+else 
+	CompTimeh=$(echo "$CompTimes / 3600" | bc)
+	CompTimes=$(echo "$CompTimes % 3600" | bc)
+	CompTimem=$(echo "$CompTimes / 60" | bc)
+        CompTimes=$(echo "$CompTimes % 60" | bc)
+        printf ">>>>>>>>>>>> Calculation ended at $(date): $CompTimeh hours, $CompTimem minutes and $CompTimes seconds\n"
+fi

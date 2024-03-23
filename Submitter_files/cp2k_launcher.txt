@@ -1,0 +1,4 @@
+module purge
+ml iccifort/2020.1.217  impi/2019.7.217 CP2K/7.1
+mpirun cp2k.popt -i $SLURM_JOB_NAME.inp -o $SLURM_JOB_NAME.out
+
