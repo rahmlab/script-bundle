@@ -1,0 +1,1276 @@
+#!/bin/bash
+
+
+INPext=com
+OUText=log
+
+
+# Last update: 19/07/2022
+
+# to add: with Opt(Cartesian) the first two matrices are NOT input + standard orientation, but Z-matrix orientation + standard orientation, then the regular input+std
+
+if [ ! "$1" ] || [ "$1" == -h ]; then
+	printf "\nCalling:\n\n"
+	printf " OutputToInput  [ output file (including extension) ]    [ -m/--mute ]   [ Request (optional) ]       (Order is irrelevant)\n\n"
+	printf "Requests:\n\n"
+	printf " -m/--mute\t\t- Mute mode: do not print any information, only essential stuff\n"
+	printf " -y/--yes\t\t- Yes mode: implicitly say yes to every question\n"
+	printf "\n"
+	printf " [none]\t\t\t- Print last geometry of the output file\n"
+	printf " -j/--status\t\t- Print just the status of the calculation (default for every option, except in mute mode and --nostatus)\n"
+	printf " -i/--info\t\t- Print status and additional info about the output file\n"
+	#printf " -n/--nostatus\t\t- Do not print the status of the calculation\n"
+	#printf " -l/--last\t\t- Print last geometry of the output file\n"
+	printf " -s/--step [Step number]- Print matrix of the specified optimization or scan (if a scan or relaxed scan) step\n"
+	printf " -r/--redo\t\t- Take last geometry and substitute it in the input file ([filename].$INPext)\n"
+	printf " -in [filename].inp\t- Place input keywords and last geometry in [filename].$INPext, which may or may not exist. If it exists, it will be overwritten.\n"
+	printf " -S/--shuffle\t\t- Same as --redo but shuffling a little bit the atom coordinates (for stuck jobs)\n"
+	printf " -xyz\t\t\t- Generate [filename].xyz with last geometry\n"
+	printf " -z/--zmatrix\t\t- Print Z-Matrix of last geometry\n"
+	printf " -C/--Converged\t\t- Print \"Converged?\" table for each step and ask which optimization step to print\n"
+	printf " -CL/--LastConverged\t- Print last \"Converged?\" table\n"
+	printf " -E/--Energy\t\t- Print energy at each step\n"
+	printf " -EL/--LastEnergy\t- Print last energy\n"
+	printf " --input-orient\t\t- Force to print input orientation instead of standard orientation\n"
+	printf "\n\n"
+	exit 1
+fi
+
+# Just to remember, the output file goes like this: Standard orientation, [calculations...], Step number n, Variable, Converged?
+
+#ADD: -info (che da anche piu info del normale), migliorare "probably still running"
+# be able to select the various scan steps
+#figure out at what point it says "Berny opt" and "Search for a minimum", because at the beginning of an opt it thinks it is a single point
+#DETECTED SINGLE POINT IN A MP4 OPTIMIZATION
+#if TS search check if converged to a saddle point grade 1!"
+#too much space after converged table (CL input)
+#in TS: Cl works but C not
+
+
+PrintStatus=0
+NextInput=0
+MutedMode=0
+TempMutedMode=0
+YesMode=0
+NoStatus=0
+InfoPrinting=0
+QuietMode=0
+MakeXYZ=0
+Redo=0
+Shuffle=0
+MakeZMatrix=0
+InputOrient=0
+Username=$(echo $PWD | cut -d '/' -f 4)
+kH=627.50947407
+
+Printf () {	
+	if [ $MutedMode -eq 1 ] || [ $TempMutedMode -eq 1 ]; then # ( [ $NoStatus -eq 1 ] && [ $InfoPrinting -eq 1 ] ); then	
+		printf ""
+	else
+		printf "$1"
+	fi
+}	
+
+Graphic () {
+        Printf "\n--------------------- OutputToInput - Gaussian output file analyzer -- by Marco Cappelletti -- All rights reserved ---------------------\n"
+#       printf "\n\n"
+#       printf "   ___       _             _  _____    ___                _   \n"
+#       printf "  / _ \ _  _| |_ _ __ _  _| ||_   _|__|_ _|_ _  _ __ _  _| |_ \n"
+#       printf " | (_) | || |  _| '_ \ || |  _|| |/ _ \| || ' \| '_ \ || |  _|\n"
+#       printf "  \___/ \_,_|\__| .__/\_,_|\__||_|\___/___|_||_| .__/\_,_|\__|\n"
+#       printf "                |_|                            |_|            \n\n"
+        Printf "\n"
+}
+
+
+StoppedBy () {
+        Ender=$1
+	
+	Printf "\n"
+	if [ $MutedMode -eq 0 ]; then
+	        if [ $Ender == User ]; then
+         		printf "Program stopped by user. \n\n"
+        	elif [ $Ender == Error ]; then
+        		printf "$2\n\nProgram stopped by error. \n\n"
+		elif [ $Ender == NoMatrix ]; then
+			printf "\n\nProgram ended. No matrix is needed. \n\n"
+        	fi
+	else
+		if [ $Ender == User ]; then
+                        printf "Program stopped by user. \n\n"
+                elif [ $Ender == Error ]; then 
+                        printf "Program stopped by error ($2). \n\n"
+                fi
+	fi
+
+	if [ -e "$(ls | grep ".oti.tmp")" ]; then	
+		rm *.oti.tmp
+	fi
+	exit
+}
+
+AskQuestion (){
+	Question=$1
+	
+	if [ $YesMode -eq 0 ]; then
+		printf "$Question (y/any key)\n> "
+		read Ans
+        	if [ $Ans != y ] && [ $Ans != Y ]; then
+                	StoppedBy User
+        	fi
+	fi
+	
+}
+
+
+GetOutputFile (){
+	Printf "\n"
+	for CurrInp in $String; do	#String contains the variables called by the user. 
+				  	#Important: the program get the first output file (.out/.log) that encounters
+		if [ $(echo "$CurrInp" | grep ".out$") ] || [ $(echo "$CurrInp" | grep ".log$") ]; then
+		        OutputFile=$CurrInp
+			OutputFileName="${OutputFile%.*}"
+			cp $OutputFile TmpOutput.oti.tmp
+                        tmpfile=TmpOutput.oti.tmp
+			if [ ! -e $tmpfile ]; then
+				StoppedBy Error "$OutputFile not found"
+			elif [ -z "$(head -200 $tmpfile | grep "Gaussian 16:")" ]; then
+				StoppedBy Error "$OutputFile is not a Gaussian 16 output file!"
+			else
+				Printf "Output file: $(echo $OutputFile | rev | cut -d '/' -f 1 | rev)\n"
+				String=$(printf '%s\n' "${String//$CurrInp/}")
+				break
+			fi
+		elif [ $(echo "$CurrInp" | grep ".com$") ] || [ $(echo "$CurrInp" | grep ".gjf$") ]; then	
+			OutputFileName="${CurrInp%.*}"
+			OutputFile=$OutputFileName.$OUText
+			if [ -e $OutputFile ]; then
+				Printf "You gave me an input file, but i got you. Don't make this mistake again.\n"
+				Printf "Output file: $(echo $OutputFile | rev | cut -d '/' -f 1 | rev)\n"
+				String=$(printf '%s\n' "${String//$CurrInp/}")
+			else
+				StoppedBy Error "$OutputFile not found"
+			fi
+		elif [ -e $CurrInp.$OUText ]; then
+			OutputFileName=$CurrInp
+			OutputFile=$CurrInp.$OUText
+			cp $OutputFile TmpOutput.oti.tmp
+                        tmpfile=TmpOutput.oti.tmp
+                        if [ -z "$(head -200 $tmpfile | grep "Gaussian 16:")" ]; then
+                                StoppedBy Error "$OutputFile is not a Gaussian 16 output file!"
+                        fi
+			Printf "Output file: $(echo $OutputFile | rev | cut -d '/' -f 1 | rev)\n"
+			String=$(printf '%s\n' "${String//$CurrInp/}")
+		fi
+	done
+
+	if [ -z $OutputFile ]; then 
+		StoppedBy Error "Please give me an output file (.out/.log) next time" #if it doesn't find it, the program returns an error
+	fi
+	
+	
+}
+
+
+ConvergedYES (){
+	if [ -z $1 ]; then
+		NYES=$(grep -A4 "Converged?" $tmpfile | tail -4 | grep "YES" | awk 'END{print NR}')
+	elif [ $1 == "LastMinusOne" ]; then
+		NYESLastMinusOne=$(grep -A4 "Converged?" $tmpfile | tail -10 | head -4 | grep "YES" | awk 'END{print NR}')
+	fi
+}
+
+GetMethod (){
+
+	#Get iop line range
+	IopStartLine=$(awk '/----------------------------------------------------------------------/{print NR+1}' $tmpfile | awk 'FNR==2')
+	IopEndLine=$(awk '/Leave Link    1/{print NR-1}' $tmpfile)
+	sed -n "${IopStartLine},${IopEndLine}p" $tmpfile > iop.oti.tmp
+	
+	#Read method
+	
+
+	rm iop.oti.tmp
+}
+
+AnalyzeOutput (){
+
+	#GetNumberOfAtoms
+
+	#head -$N_for_head $tmpfile > $tmpfile 	#grep just the input section so the file reading will be faster to manage
+	#tail -$N_for_tail $tmpfile > $tmpfile
+
+	UnknownType=0
+	SinglePointCalc=0	
+	OptCalc=0
+	MinSearch=0
+	TSSearch=0
+	FreqCalc=0
+	ScanCalc=0
+	IRCCalc=0
+	OptScanCalc=0
+	ModRedundantOpt=0	
+
+	InfoPrinting=1
+
+	#Get all information about the job
+
+	#Printf "\nInformation about the job\n"
+	
+	Printf "\tJob type: "
+
+	if [ "$(grep "GradGradGrad" $tmpfile)" ]; then
+		if [ "$(grep "Number of optimizations in scan=" $tmpfile)" ]; then
+			OptScanCalc=1
+			Printf "relaxed scan"
+			MaxSteps=$(awk '/Number of steps in this run=/{print $7}' $tmpfile | head -1)
+		elif [ "$(grep "Search for a saddle point" $tmpfile)" ]; then
+			MaxSteps=$(awk '/Number of steps in this run/{print $7}' $tmpfile | head -1)
+			TSSearch=1
+			OptCalc=1
+			Printf "TS search"
+		elif [ "$(grep "Number of steps in this run=" $tmpfile)" ]; then
+			MaxSteps=$(awk '/Number of steps in this run=/{print $7}' $tmpfile | head -1)
+			if [ $MaxSteps -gt 2 ]; then
+				OptCalc=1
+				MinSearch=1
+				Printf "optimization"
+			else
+				SinglePointCalc=1
+				Printf "single point"
+			fi
+		else
+			echo "Dunno! (this type of job is new to me. Add it in my code please)"
+		fi
+		
+		if [ "$(grep "The following ModRedundant input section" $tmpfile)" ]; then
+			Printf " (modredundant)"
+			ModRedundantOpt=1
+		fi
+	elif [ "$(grep "IRC-IRC-IRC" $tmpfile)" ]; then
+		IRCCalc=1
+		Printf "IRC calculation"
+		if [ "$(grep "Follow reaction path in both directions" $tmpfile)" ]; then
+			Printf " in both directions"
+		elif [ "$(grep "Follow reaction path in FORWARD directions" $tmpfile)" ]; then
+			Printf " in forward direction"
+		elif [ "$(grep "Follow reaction path in both directions" $tmpfile)" ]; then
+			Printf " in reverse direction"
+		fi
+	elif [ "$(grep "Scan the potential surface" $tmpfile)" ]; then
+		ScanCalc=1
+		Printf "PES Scan"
+	elif [ "$(grep "A syntax error was detected in the input line." $tmpfile)" ] || [ "$(grep "Input Error" $tmpfile)" ]; then
+		Printf "Unknown\n"
+		Printf "\tError in the input file\n"
+		StoppedBy End
+	else
+		Printf "single point"
+		SinglePointCalc=1
+	fi
+
+	
+	if [ $TSSearch -eq 1 ] || [ "$(head -100 $tmpfile | grep -i "freq")" ] || ( [ "$(grep -i "calcall" $tmpfile)" ] && [ $IRCCalc -eq 0 ] ) || [ "$(grep -i "freq" $tmpfile | grep -v "FREQUENT")" ]; then
+                FreqCalc=1
+		Printf " and frequencies calculation"
+        fi
+	
+
+	Printf "\n"
+	
+	#GetMethod
+
+	Printf "\tStatus: "
+	if [ "$(tail -10 $tmpfile | grep "Normal termination of Gaussian")" ]; then
+		Printf "completed\n"
+		CalcDone=1
+		NormalTerm=1
+		ErrorTerm=0
+	elif [ "$(grep "Error termination" $tmpfile)" ]; then
+		Printf "terminated with an error\n"
+		CalcDone=1
+		ErrorTerm=1
+		NormalTerm=0
+	else
+		Printf "probabily still running\n"
+		CalcDone=0
+		ErrorTerm=0
+		NormalTerm=0
+	fi
+
+	if [ $PrintStatus -eq 0 ]; then
+		TempMutedMode=1
+	fi
+		
+	Steps=0
+	ScanSteps=0
+
+	#Get number of steps
+	
+	if [ $OptCalc -eq 1 ]; then
+		if [ -z "$(grep " orientation:" $tmpfile)" ]; then
+			Steps=-1
+		elif [ -z "$(awk '/Step number/{print $1}' $tmpfile)" ]; then
+			Steps=0
+		elif [ $MaxSteps -eq $(awk '/Step number/{a=$9}END{print a}' $tmpfile) ]; then
+			Steps=$(awk '/Step number /{a=$3}END{print a}' $tmpfile)
+		elif [ $FreqCalc -eq 1 ] && [ $NormalTerm -eq 1 ]; then
+			Steps=$(($(grep "Step number " $tmpfile | awk 'END{print NR}') -1 ))  #if freq calculation is performed there's an additional step
+		elif [ $FreqCalc -eq 1 ] && [ "$(grep "Proceeding to internal job step number  2") $tmpfile" ] && [ "$(grep "Step number   1 out of a maximum of    2") $tmpfile" ]; then
+			Steps=$(($(grep "Step number " $tmpfile | awk 'END{print NR}') -1 ))  #if freq calculation is performed there's an additional step
+		else
+			Steps=99999 #So that I detect some error
+		fi
+		if [ "$(grep "Optimization completed." $tmpfile)" ]; then
+			OptDone=1
+		else
+			OptDone=0
+		fi 
+	fi
+
+	if [ $OptScanCalc -eq 1 ]; then
+		OptScanSteps=$(awk '/Step number/{print $13}' $tmpfile | tail -1)
+                MaxOptScanSteps=$(awk '/Number of optimizations in scan=/{print $6}' $tmpfile | tail -1)
+            	LastOptSteps=$(awk '/Step number/{print $3}' $tmpfile | tail -1)
+             	MaxOptSteps=$(awk '/Step number/{print $9}' $tmpfile | tail -1)
+		NFailedOpt=$(awk '/Number of steps exceeded/' $tmpfile | awk 'END{print NR}')
+		CompletedSteps=$((LastOptSteps - NFailedOpt -1))
+		if [ -z $OptScanSteps ]; then
+                        Printf "\tRelaxed scan: optimizing the first step\n"
+		elif [ $OptScanSteps -eq $((CompletedSteps + NFailedOpt)) ]; then
+                	Printf "\tScan steps performed: $OptScanSteps out of $MaxOptScanSteps\n"
+			Printf "\tNumber of failed optimization steps: $NFailedOpt\n"
+		else
+			Printf "\tScan steps performed: $((--OptScanSteps)) out of $MaxOptScanSteps\n"
+			Printf "\tNumber of failed optimization steps: $NFailedOpt\n"
+		fi
+		if [ $CalcDone -eq 0 ] && [ $OptScanSteps ]; then
+			Printf "\tStep performed in the current optimization: $LastOptSteps out of $MaxOptSteps\n"
+			ConvergedYES
+                        Printf "\tOptimization status: $NYES YES in the last step\n"
+			if [ $OptScanSteps -gt 0 ]; then
+				DaysPassedInMin=$(echo $" ( $(date +"%d") - $(awk '/Leave Link    1/{print $7}' $tmpfile) ) * 24 * 60" | bc -l)
+				StartTime=$(awk '/Leave Link    1/{print $8}' $tmpfile)	
+				PartMinutesPassed=$(echo $"( $(date +"%H") - $(echo $StartTime | cut -d ':' -f 1) ) * 60 + ( $(date +"%M") - $(echo $StartTime | cut -d ':' -f 2) )" | bc -l)
+				MinutesPassed=$(echo $"$PartMinutesPassed + $DaysPassedInMin" | bc -l)
+				ProgressPercent=$(echo $" $OptScanSteps / $MaxOptScanSteps " | bc -l)
+				MinutesRemaining=$(echo $"scale=1;$MinutesPassed * ( 1 / $ProgressPercent - 1 )" | bc -l)
+				DaysRemaining=$(echo $" $MinutesRemaining / 1440" | bc)
+				MinutesRemaining=$(echo $" $MinutesRemaining % 1440" | bc)
+				HoursRemaining=$(echo $" $MinutesRemaining / 60" | bc)
+				MinutesRemaining=$(echo $" $MinutesRemaining % 60" | bc)	
+				if [ $DaysRemaining -eq 0 ]; then
+					Printf "\tTime remaining: circa $HoursRemaining hours and $MinutesRemaining minutes\n"
+				else
+					Printf "\tTime remaining: circa $DaysRemaining day(s) and $HoursRemaining hours\n"
+				fi
+			fi
+		fi
+	elif [ $ScanCalc -eq 1 ] && [ $CalcDone -eq $ErrorTerm ]; then			#Only if error termination or still running
+		TotScanSteps=$(grep "A total of" $tmpfile | awk '{print $4}')
+		CurrScanStep=$(grep "Variable Step" $tmpfile | awk 'END{print NR}')
+		Printf "\tScan steps performed: $CurrScanStep of $TotScanSteps \n"
+	elif [ $OptCalc -eq 1 ] && [ $Steps -gt 0 ]; then
+		MaxSteps=$(awk '/Number of steps in this run/{print $7}' $tmpfile | head -1)
+		if [ $ErrorTerm -eq 1 ]; then
+			Printf "\tError: "
+			if [ "$(grep "Number of steps exceeded" $tmpfile)" ]; then
+                                Printf "Number of steps exceeded ($MaxSteps)\n"    
+			elif [ "$(grep "Linear angle in Tors." $tmpfile)" ]; then
+				Printf "Linear angle in Tors.\n"
+				Printf "\t\tSuggestion: use Opt=Cartesian keyword\n"
+			elif [ "$(grep "Tors failed for dihedral" $tmpfile)" ]; then
+				Printf "Tors failed for dihedral.\n"
+				Printf "\t\tSuggestion: use Opt=Cartesian keyword\n"
+			elif [ "$(grep "Linear angle in Bend." $tmpfile)" ]; then
+				Printf "Linear angle in Bend.\n"
+				Printf "\t\tSuggestion: use Opt=Cartesian keyword\n"
+			elif [ "$(grep "Error in internal coordinate system" $tmpfile)" ]; then
+				Printf "Error in internal coordinate system.\n"
+				Printf "\t\tSuggestion: use Opt=Cartesian keyword\n"
+			elif [ "$(grep "SCF has not converged" $tmpfile)" ]; then
+				Printf "SCF has not converged!\n"
+			else
+				Printf "check output file\n"
+                        fi
+                fi
+		if [ -z "$(grep "Number of steps exceeded" $tmpfile)" ]; then
+			Printf "\tOptimization steps performed: $Steps out of a maximum of $MaxSteps\n" 
+		fi
+
+		if [ $OptDone -eq 0 ]; then
+			ConvergedYES
+			Printf "\tOptimization status: $NYES YES in the last step\n"
+		elif [ $ErrorTerm -eq 1 ]; then
+			ConvergedYES
+                        Printf "\t\tLast optimization step had $NYES YES\n"
+		fi
+	elif [ $OptCalc -eq 1 ] && [ $Steps -eq -1 ] && [ $CalcDone -eq 0 ]; then
+		Printf "\tOptimization: job has just started...\n"
+	elif [ $OptCalc -eq 1 ] && [ $Steps -eq 0 ] && [ $CalcDone -eq 0 ]; then
+                Printf "\tOptimization: computing the first step\n"
+	elif [ $OptCalc -eq 1 ] && [ $Steps -eq 1 ] && [ $CalcDone -eq 1 ]; then
+		Printf "\tNo optimization steps performed\n"
+	elif [ $IRCCalc -eq 1 ]; then
+		IRCSteps=$(awk '/# OF POINTS ALONG THE PATH =/{a=$8}END{print a}' $tmpfile)
+		if [ -z $IRCSteps ]; then
+			IRCSteps=0
+		fi
+		MaxIRCSteps=$(awk '/Maximum points per path/{print $6}' $tmpfile)
+		Printf "\tTotal IRC points computed: $IRCSteps out of a maximum of $(echo $"$MaxIRCSteps*2"|bc) ($MaxIRCSteps per direction)\n"
+		Printf "\tForward path: "
+		if [ "$(grep -B2 "Calculation of FORWARD path complete" $tmpfile | grep "PES minimum detected")" ]; then
+			Printf "minimum found after $(grep "FORWARD path direction" $tmpfile | awk 'END{print NR}') steps\n"
+		elif [ "$(grep -B1 "Calculation of FORWARD path complete" $tmpfile | grep "Maximum number of steps")" ]; then
+			Printf "maximum number of steps reached!\n"
+		elif [ "$(grep "Calculation of FORWARD path complete" $tmpfile)" ]; then
+			Printf "completed with $(grep "FORWARD path direction" $tmpfile | awk 'END{print NR}') steps\n"
+		elif [ $ErrorTerm -eq 1 ] && [ -z "$(grep "Beginning calculation of the REVERSE path" $tmpfile)" ]; then
+			Printf "terminated at step number $(grep "FORWARD path direction" $tmpfile | awk 'END{print NR}')."
+			if [ "$(grep "Maximum number of corrector steps exceded." $tmpfile)" ]; then
+                                Printf " Maximum number of corrector steps exceded!\n"
+                        else
+                                Printf "\n"
+                        fi
+		else
+			Printf "still running, computing step number $(grep "FORWARD path direction" $tmpfile | awk 'END{print NR}')\n"
+		fi
+		Printf "\tReverse path: "
+		if [ -z "$(grep "Beginning calculation of the REVERSE path" $tmpfile)" ]; then
+			if [ $ErrorTerm -eq 1 ]; then
+				Printf "not even started\n"
+			else
+				Printf "not started yet\n"
+			fi
+		elif [ "$(grep -B2 "Calculation of REVERSE path complete" $tmpfile | grep "PES minimum detected")" ]; then
+                        Printf "minimum found after $(grep "REVERSE path direction" $tmpfile | awk 'END{print NR}') steps\n"
+                elif [ "$(grep -B1 "Calculation of REVERSE path complete" $tmpfile | grep "Maximum number of steps")" ]; then
+                        Printf "maximum number of steps reached!\n"
+                elif [ "$(grep "Calculation of REVERSE path complete" $tmpfile)" ]; then
+                        Printf "complete with $(grep "REVERSE path direction" $tmpfile | awk 'END{print NR}') steps\n"
+		elif [ $ErrorTerm -eq 1 ]; then
+			Printf "terminated at step number $(grep "REVERSE path direction" $tmpfile | awk 'END{print NR}')."
+			if [ "$(grep "Maximum number of corrector steps exceded." $tmpfile)" ]; then
+				Printf " Maximum number of corrector steps exceded!\n"
+			else
+				Printf "\n"
+			fi
+                else
+                        Printf "still running with $(grep "REVERSE path direction" $tmpfile | awk 'END{print NR}') steps\n"
+                fi
+	elif [ $ErrorTerm -eq 1 ]; then
+		if [ "$(grep "SCF has not converged" $tmpfile)" ]; then
+			Printf "\tError: SCF has not converged!\n"
+		else
+			Printf "\tError message:$(awk 'FNR=='$(awk 'END{print NR-4}' $tmpfile)'{print $0}' $tmpfile)\n"
+		fi
+	fi
+
+	if [ $OptCalc -eq 1 ] && [ $OptDone -eq 1 ] && [ $ErrorTerm -eq 0 ]; then
+
+		if [ $CalcDone -eq 0 ] && [ $FreqCalc -eq 1 ]; then
+			Printf "\tOptimization completed but still computing frequencies\n"
+			NOfConverged=1
+			ConvergedYES
+		else
+			NOfConverged=2
+			ConvergedYES
+			ConvergedYES LastMinusOne
+			
+		fi
+		Printf "\tOptimization result: "
+
+		if [ $NOfConverged -eq 1 ]; then
+			if [ $NYES -eq 4 ]; then
+				Printf "converged "
+			elif [ $NYES -le 3 ] && [ "$(grep "Optimization completed on the basis of negligible forces" $tmpfile)" ]; then
+				Printf "NOT converged but completed since negligible forces "
+			elif [ $NYES -eq 3 ]; then
+				Printf "practically converged (3 YES) "
+			else
+				Printf "NOT converged!!! "
+			fi
+		elif [ $NOfConverged -eq 2 ]; then
+			if [ $NYES -eq 4 ]; then
+                                Printf "converged "
+			elif [ $NYESLastMinusOne -eq 4 ]; then
+				Printf "optimization converged but NOT after freq calc ($NYES YES)!! "
+			elif [ $NYESLastMinusOne -lt 4 ] && [ "$(grep "Optimization completed on the basis of negligible forces" $tmpfile)" ]; then
+				Printf "opt NOT converged but completed since neglig forces AND also after freq calc ($NYESLastMinusOne and $NYES YES)!! "
+			elif [ $NYES -eq 3 ] && [ $NYESLastMinusOne -eq 3 ]; then
+				Printf "practically converged (3 and 3 YES) "
+			else
+				Printr "NOT converged ($NYESLastMinusOne and $NYES YES)!! "
+			fi
+		fi
+
+		
+		if [ $(grep -A4 "Threshold" $tmpfile | tail -4 | awk 'END{print $4}') == "0.001200" ]; then
+			Printf "(with normal criteria)\n"
+		elif [ $(grep -A4 "Threshold" $tmpfile | tail -4 | awk 'END{print $4}') == "0.000040" ]; then
+                        Printf "(with tight criteria)\n"
+		elif [ $(grep -A4 "Threshold" $tmpfile | tail -4 | awk 'END{print $4}') == "0.000004" ]; then
+                        Printf "(with verytight criteria)\n"
+		elif [ $(grep -A4 "Threshold" $tmpfile | tail -4 | awk 'END{print $4}') == "0.006667" ]; then
+                        Printf "(with loose criteria)\n"
+		else
+			Printf "\n"
+		fi
+	fi
+
+	if [ $FreqCalc -eq 1 ] && [ $CalcDone -eq 1 ] && [ $ErrorTerm -eq 0 ]; then
+		Printf "\tFrequencies result: "
+		LowestFreq=$(awk '/Frequencies/{print $3}' $tmpfile | head -1)
+		SecondLowestFreq=$(awk '/Frequencies/{print $4}' $tmpfile | head -1)
+		if (( $(echo "$LowestFreq > 0.00" |bc -l)  )); then
+			if [ $MinSearch -eq 1 ]; then
+				Printf "minimum point found. " 
+				if (( $(echo "$LowestFreq < 50.00" |bc -l)  )); then
+					Printf "Warning: very low frequency modes!"
+				fi
+				Printf "\n"
+			elif [ $TSSearch -eq 1 ]; then
+				Printf "ERROR: converged to a minimum point!!\n"
+			else
+				Printf "computed a local minimum.\n"
+			fi
+		elif (( $(echo "$LowestFreq < 0.00" |bc -l)  )) && (( $(echo "$SecondLowestFreq > 0.00" |bc -l)  )); then
+			if [ $MinSearch -eq 1 ]; then
+				Printf "ERROR: converged to saddle point!!\n"
+			elif [ $TSSearch -eq 1 ]; then
+				Printf "transition state found "
+				if (( $(echo "$LowestFreq > -120.00" |bc -l)  )); then
+					Printf "\n\t\tWarning: small imaginary frequency. Might not be the sought TS!\n"
+				elif (( $(echo "$LowestFreq < -900.00" |bc -l)  )); then
+					Printf "(probably a proton transfer)\n"
+				else
+					Printf "\n"
+				fi
+			else
+				Printf "computed a transition state\n"
+			fi
+		else
+			Printf "not a stationary point!!\n"
+		fi	
+	fi
+	Printf "\n"	
+	
+	if [ $PrintStatus -eq 0 ] ; then
+                TempMutedMode=0
+        fi
+
+
+	InfoPrinting=0
+}
+
+
+ConvergedTable (){		#if $1=Last (print last table) or All
+	if [ $1 == "Last" ]; then
+		grep -A4 "Converged?" $tmpfile | tail -5
+		Printf "\n\n"
+	elif [ $1 == "All" ]; then
+		grep -A4 "Converged?" $tmpfile > Converged.oti.tmp
+                for n in $(seq 1 $Steps); do
+                        ConvLine=$(awk '/Converged?/{print NR}' Converged.oti.tmp | awk "FNR==$n")
+                        printf "Step number $n\n$(awk "FNR==$ConvLine,FNR==$ConvLine+4" Converged.oti.tmp)\n\n\n"
+                done
+		rm Converged.oti.tmp	
+	fi
+}
+
+
+IRCOptions (){
+	Printf "Select step to print:\n"
+	Printf "\t1-$IRCSteps\n"
+	StoppedBy End
+}
+
+
+ReadUserOptions (){
+	CheckOptCalc
+
+	if [ $IRCCalc -eq 1 ]; then
+		Printf "Warning: IRC calcs are not fully supported. Double-check on what you're doing\n\n"
+	fi
+
+	Printf "\nUser request: "
+	NF=$(echo "$String" | awk '{print NF}')
+	for i in $(seq 1 $NF); do
+		CurrStr="$(printf -- "$String" | awk '{print $('$i')}')"
+		if [ $CurrStr == "-s" ] || [ $CurrStr == "--step" ]; then
+			Op=$(echo $String | awk '{print $('$i'+1)}')
+			if [ -z $Op ]; then
+				StoppedBy Error "Error: Specify the step number"
+			fi
+			if [ $OptScanCalc -eq 1 ] || [ $ScanCalc -eq 1 ]; then
+				if [ $Op -lt 0 ]; then
+					 StoppedBy Error "negative step number"
+				 elif [ $Op -gt $MaxOptScanSteps ]; then
+					 StoppedBy Error "Maximum allowed step: $MaxOptScanSteps"
+				elif [ $Op -eq 0 ]; then
+					Printf "print input matrix"
+					Op=1
+				else
+					Printf "print scan step $Op (of $MaxOptScanSteps)\n\n"
+					stand_orient_num=0
+					for ssn in $(seq 1 $Op); do
+						if [ $ssn -le 9 ]; then
+							stand_orient_num=$(echo $"$stand_orient_num + $(grep "on scan point     $ssn" $tmpfile | awk 'END{print NR}')" | bc)
+						else
+							stand_orient_num=$(echo $"$stand_orient_num + $(grep "on scan point    $ssn" $tmpfile | awk 'END{print NR}')" | bc)
+						fi
+					done
+					StepNumber=$stand_orient_num
+				fi
+				CheckStepNumber $Op
+			elif [ $OptCalc -eq 1 ]; then
+				if [ $Op -eq 0 ]; then
+					Printf "print input matrix. Note! Input matrix is step 1!! I fixed that for you\n\n"
+					Op=1
+					StepNumber=1
+				elif [ $Op -lt 0 ]; then
+					Printf "print a step that is negative? Bruh\n\n"
+					StoppedBy Error 
+				elif [ $Op -eq $Steps ]; then
+					Printf "print last step\n\n"
+					StepNumber=$Steps
+				elif [ $Op -eq 1 ]; then
+					Printf "print input matrix\n\n" 
+					StepNumber=1
+				elif [ $Op -gt $Steps ]; then
+					StoppedBy Error "Error: exceeded number of steps (max is $Steps)"
+				else
+					Printf "print step number $Op of $Steps\n\n"
+					StepNumber=$Op
+				fi
+			elif [ $IRCCalc -eq 1 ]; then
+				if [ $Op -eq 0 ]; then
+					Printf "print TS geometry\n\n"
+					IRCStepToPrint=0
+					break
+				elif [ $Op -eq -1 ]; then
+					Printf "print reverse minimum geometry\n\n"
+					IRCStepToPrint=-1
+					break
+				elif [ $Op -eq 1 ]; then
+					Printf "print forward minimum geometry\n\n"
+					IRCStepToPrint=1
+					break
+				else
+					Printf "Error: it should be -1 (reverse), 0 (TS), 1 (forward)\n"
+					StoppedBy Error
+				fi
+			fi
+			break
+		elif [ $CurrStr == "-j" ] || [ $CurrStr == "--status" ]; then
+			Printf "Nothing"
+			StoppedBy End
+		elif [ $CurrStr == "-i" ] || [ $CurrStr == "--info" ]; then
+			Printf "Additional information. Here you are:\n"
+			StepNumber=1
+			Printf "\tNumber of atoms: $atoms\n"
+			Nel=$(grep "alpha electrons" $tmpfile | awk 'FNR==1{print $1*2}')
+			Nbasis=$(grep "basis functions," $tmpfile | awk 'FNR==1{print $1}')
+			Printf "\tStoichiometry: $(awk '/Stoichiometry/{a=$2}END{print a}' $tmpfile)\n"
+			Printf "\tNumber of electrons: $Nel\n"
+			Printf "\tBasis set: $(awk '/Standard basis:/{print $3}' $tmpfile | head -1)\n"
+			Printf "\tNumber of basis functions: $Nbasis\n"
+			if [ "$(grep "Solvent              :" $tmpfile | head -1)" ]; then
+                                SolventStr=$(grep "Solvent              :" $tmpfile | head -1 | awk '/Solvent/{print $3,$4,$5}')
+                                Printf "\tSolvation: PCM ($SolventStr)\n"
+                        else
+                                Printf "\tSolvation: Vacuum\n"
+                        fi
+			if [ $OptCalc -eq 1 ] && [ $Steps -gt 0 ]; then
+                                Printf "\tLast optimization step: "
+				for i in $(seq 1 4); do 
+					Printf "$(grep -A4 "Converged?" $tmpfile | tail -4 | awk 'FNR=='$i'{print $3}')"
+					if [ $i -le 3 ]; then
+						Printf ", "
+					fi
+				done
+				echo ""
+                        fi
+			if [ $NormalTerm -eq 1 ] && [ $IRCCalc -eq 0 ]; then
+				Printf "\tElectronic energy:\t $(LastEnergy $OutputFile) kcal mol^-1\n"
+			elif [ $ErrorTerm -ne 1 ] && [ $Steps -gt 0 ] && [ $IRCCalc -eq 0 ] && [ $OptScanCalc -eq 0 ]; then
+				Printf "\tLast electronic energy:\t $(LastEnergy $OutputFile) kcal mol^-1\n"
+			fi
+			if [ $FreqCalc -eq 1 ] && [ $CalcDone -eq 1 ] && [ $NormalTerm -eq 1 ]; then
+				Printf "\tGibbs free energy:\t $(LastEnergy $OutputFile -g) kcal mol^-1\n"
+				Printf "\tqh-G (Grimme RRHO):\t $(LastEnergy $OutputFile -g -q 2>/dev/null) kcal mol^-1\n"
+				Printf "\tLowest frequency: $LowestFreq cm^-1\n"
+				freq_NF=3
+				freq_NR=1
+				lowfreqcount=0
+				while (( $(echo "$(awk '/Frequencies/{print $'$freq_NF'}' $tmpfile | awk 'FNR=='$freq_NR'')  < 50.00" |bc -l)  )); do
+					((lowfreqcount++))
+					if [ $freq_NF -lt 5 ]; then
+						((freq_NF++))
+					else
+						freq_NF=3
+						((freq_NR++))
+					fi
+				done
+				if [ $TSSearch -eq 1 ]; then
+					((lowfreqcount--))
+				fi
+				Printf "\tNumber of positive freq < 50 cm^-1: $lowfreqcount\n"
+			fi
+				
+
+#			if [ $CalcDone -eq 1 ] && [ $NormalTerm -eq 1 ]; then
+#				Dipolex=$(grep "Dipole=" $tmpfile | cut -d ',' -f 1 | cut -d "=" -f 3)
+#				Dipoley=$(grep "Dipole=" $tmpfile | cut -d ',' -f 2)
+#				Dipolez=$(grep "Dipole=" $tmpfile | cut -d ',' -f 3 | cut -d "\\" -f 1)
+#				Printf "\tDipole moment: ($Dipolex, $Dipoley, $Dipolez)\n"
+#			fi
+#			if [ $ModRedundantOpt -eq 1 ]; then
+#				ModredLine=$(awk '/The following ModRedundant input section/{print NR+1}' $tmpfile)
+#				#while [ "$(awk 'FNR=='$ModredLine'{print $2}' $tmpfile)" ]; do 
+#					((i++))
+#				done
+#			fi 
+			StoppedBy End
+		elif [ $CurrStr == "-in" ] || [ $CurrStr == "-IN" ] || [ $CurrStr == "-In" ]; then
+			NextInput=1
+			InputFileName=$(echo $String | awk '{print $('$i'+1)}')
+			Printf "place keywords and last step in $InputFileName (if it exists, it will be overwritten!).
+              Warning: the input file "$OutputFileName".$INPext must exist and be unmodified\n\n"
+			StepNumber=$Steps
+			break
+		elif [ $CurrStr == "-C" ] || [ $CurrStr == "--converged" ]; then
+			Printf "print all \"Converged?\" tables\n\n"
+			ConvergedTable All
+			#echo "Step number? Press 0 for minimum search, -1 to exit program"
+                	#read ReadStep
+			#if [ $ReadStep -eq -1 ]; then
+		#		StoppedBy User
+			#elif [ $ReadStep -eq 0 ]; then
+		#		MinimumSearch
+			#else
+			#	CheckStepNumber $ReadStep
+			#fi
+			exit
+		elif [ $CurrStr == "-CL" ] || [ $CurrStr == "--LastConverged" ] || [ $CurrStr == "-cl" ]; then
+			Printf "print last \"Converged?\" table\n\n"
+			echo "Last step convergence table:"
+			ConvergedTable Last
+			echo ""
+			exit
+		elif [ $CurrStr == "--Energy" ] || [ $CurrStr == "-E" ]; then
+			Printf "print computed energy of all steps\n\n"
+			printf "Step\tE (kcal/mol)\tDE (kcal/mol)\tEnergy change\tPercent change\n"
+			for m in $(seq 1 $Steps); do
+				E_currm=$(grep  "E([R,U]" $tmpfile | awk 'FNR=='$m+1'{printf ( "%.4f\n", $5 * '$kH' )}')
+                       		printf "$m:\t$E_currm\t"
+				if [ $m -gt 1 ]; then
+					deltaEfirst=$(awk 'BEGIN{printf ( "%.2f\n", '$E_currm' - '$E_first'  )}')
+					deltaEprec=$(awk 'BEGIN{printf ( "%.2f\n", '$E_currm' - '$E_precm'  )}')
+					perc_change=$(awk 'BEGIN{printf ( "%.2e\n", ( '$E_currm' - '$E_precm' ) / '$E_precm'  * 100 )}')
+					printf -- "$deltaEfirst\t\t$deltaEprec\t\t$perc_change\n"
+				elif [ $m -eq 1 ]; then
+					E_first=$E_currm
+					printf -- "0.00\n"
+				else
+					printf "\n"
+				fi
+				E_precm=$E_currm
+                	done
+                	exit	
+		elif [ $CurrStr == "--LastEnergy" ] || [ $CurrStr == "-EL" ]; then
+                        Printf "print last computed energy\n\n"
+                        printf "Last step energy: $(grep  "E([R,U]" $tmpfile | awk 'END{print $5}') Hartree\n\n"
+			exit
+		elif [ $CurrStr == "-r" ] || [ $CurrStr == "--redo" ]; then
+			StepNumber=$Steps
+			Printf "substitute last step in the input file (it will be overwritten). Warning: the input file must contain a xyz matrix\n\n"
+			Redo=1
+			break
+		elif [ $CurrStr == "-S" ] || [ $CurrStr == "--shuffle" ]; then
+			Shuffle=1
+                        break		
+		elif [ $CurrStr == "-xyz" ] || [ $CurrStr == "-XYZ" ]; then
+			StepNumber=$Steps
+                        Printf "print last step in a .xyz format\n\n"
+                        MakeXYZ=1
+                        break
+		elif [ $CurrStr == "-z" ] || [ $CurrStr == "--zmatrix" ]; then
+			Printf "print the Z-Matrix of the last step.\n\n"
+			MakeZMatrix=1
+			break
+		else
+			Printf "I don't understand $CurrStr"
+			StoppedBy Error
+		fi
+	done
+
+	if [ $Redo -eq 0 ] && [ $MakeXYZ -eq 0 ] && [ $MakeZMatrix -eq 0 ]; then
+	if [ -z $StepNumber ] && [ $IRCCalc -eq 0 ] && [ $OptScanCalc -eq 0 ]; then
+		Printf "print default step "
+		if [ $Steps -gt 1 ]; then
+			Printf "(which is last step: $Steps/$Steps)\n"
+        		StepNumber=$Steps
+		elif [ $IRCCalc -eq 1 ]; then
+			Printf "(IRC calc: TS geometry will be printed)\n"
+			StepNumber=1
+		else
+			Printf "(input matrix)"
+			StepNumber=1
+		fi
+	elif [ $IRCCalc -eq 1 ]; then
+		if [ -z $IRCStepToPrint ]; then
+			Printf "print default step (TS geometry)\n"
+			echo "WARNING: not implemented yet"
+                        exit
+			StepNumber=0
+		elif [ $IRCStepToPrint -eq 0 ]; then
+			Printf "print TS geometry\n"
+			echo "WARNING: not implemented yet"
+			exit
+			StepNumber=0
+		elif [ $IRCStepToPrint -eq -1 ]; then
+			Printf "print last reverse geometry\n"
+			echo "WARNING: not implemented yet"
+                        exit
+			StepNumber=1
+		elif [ $IRCStepToPrint -eq 1 ]; then
+			Printf "print last foreward geometry\n"
+			echo "WARNING: not implemented yet"
+			exit
+			StepNumber=1
+		fi
+	elif [ $OptScanCalc -eq 1 ] && [ -z $StepNumber ]; then
+		Printf "print last step ($MaxScanSteps/$MaxScanSteps)"
+		StepNumber=$(grep "Step number" $tmpfile | awk 'END{print NR}')
+	elif [ $StepNumber -eq $Steps ]; then
+		Printf "print last step ($Steps/$Steps)\n"
+	elif [ $StepNumber -eq 1 ]; then
+	        Printf "Input Matrix will be printed\n"
+	else
+        	Printf "Step $StepNumber of $Steps will be printed\n"
+	fi
+	fi
+	Printf "\n"
+}
+
+#if [ $IRCCalc -eq 1 ]; then
+#                IRCOptions
+#        fi
+
+CheckOptCalc (){
+	if [ $ScanCalc -eq 1 ]; then
+		StoppedBy Error	"This is a scan, I can't do what you are asking me"
+	fi
+}
+
+
+CheckStepNumber (){
+if [ $OptCalc -eq 1 ]; then
+	if [ $Steps -eq 0 ]; then
+		StoppedBy End "No steps performed yet!"
+	elif [ $1 -gt $Steps ]; then
+        	Printf "Exceeded number of steps ($Steps)!!!!! Going for last step\n"
+        	StepNumber=$Steps
+      	elif [ $1 -lt 0 ]; then
+       		StoppedBy Error "Negative number of steps?"
+      	else
+    		StepNumber=$1
+      	fi
+fi
+
+}
+
+GetMatrixLineNumber (){
+if [ $Steps -eq -1 ]; then
+	Printf "No steps yet!\n"
+	StoppedBy End
+fi
+
+
+if [ $InputOrient -eq 1 ]; then
+        Nosymm=1
+	Printf "\nInfo: input orientation requested\n\n"
+        line=$(awk '/Input orientation:/{ print NR+5}' $tmpfile | awk 'FNR=='$StepNumber'')
+elif [ "$(grep "Symmetry turned off" $tmpfile)" ]; then
+	Nosymm=1
+        Printf "\nInfo: symmetry is turned off, input orientation will be printed \n\n"
+        line=$(awk '/Input orientation:/{ print NR+5}' $tmpfile | awk 'FNR=='$StepNumber'')
+else
+	Nosymm=0
+	if [ $OptCalc -eq 1 ]; then
+		line=$(awk '/Standard orientation:/{ print NR+5}' $tmpfile | awk 'FNR=='$StepNumber'') #Get stardard orientation table line number
+	else
+		line=$(awk '/Standard orientation:/{ print NR+5}' $tmpfile | tail -1)
+	fi
+fi
+
+if [ -z $line ]; then
+        StoppedBy Error "Something went wrong: xyz matrix not found"
+fi
+
+}
+
+
+GetNumberOfAtoms (){
+atoms=$(awk '/NAtoms=/{print $2}' $tmpfile | head -1)
+
+if [ -z $atoms ]; then 	#brute force  
+	GetMatrixLineNumber
+	eof=0
+	atoms=0
+	k=0
+	while [ $eof -eq 0 ]; do
+	        if [ $(awk 'FNR=='$line+$atoms',FNR=='$line+$atoms+20'{print $1}' $tmpfile | grep "\--") ]; then
+	                for l in $(seq 1 20); do
+	                        if [ $(awk 'FNR=='$line+$atoms'{print $1}' $tmpfile | grep "\--") ]; then      
+	                                eof=1
+	                        else
+	                                ((atoms++))
+	                        fi
+	                done
+	        else
+	                ((atoms+=20))
+	        fi
+	done
+fi
+}
+
+
+
+WriteAtomMatrix (){
+
+	if [ "$(grep "Symbolic Z-matrix" $tmpfile)" ]; then
+		zmatrixline=$(awk '/Symbolic Z-matrix/{ print NR+2}' $tmpfile | head -1)
+		awk 'FNR=='$zmatrixline',FNR=='$zmatrixline+$atoms-1'{print $1}' OFS='\t' $tmpfile > atoms.oti.tmp
+	else
+		awk 'FNR=='$line',FNR=='$line+$atoms-1'{print $2}' OFS='\t' $tmpfile  > atoms.oti.tmp
+		sed -i 's/31/Ga/g' atoms.oti.tmp
+        	sed -i 's/32/Ge/g' atoms.oti.tmp
+        	sed -i 's/33/As/g' atoms.oti.tmp
+        	sed -i 's/34/Se/g' atoms.oti.tmp
+        	sed -i 's/35/Br/g' atoms.oti.tmp
+        	sed -i 's/10/Ne/g' atoms.oti.tmp
+        	sed -i 's/11/Na/g' atoms.oti.tmp
+        	sed -i 's/12/Mg/g' atoms.oti.tmp
+        	sed -i 's/13/Al/g' atoms.oti.tmp
+        	sed -i 's/14/Si/g' atoms.oti.tmp
+        	sed -i 's/15/P/g' atoms.oti.tmp
+        	sed -i 's/16/S/g' atoms.oti.tmp
+        	sed -i 's/17/Cl/g' atoms.oti.tmp
+        	sed -i 's/18/Ar/g' atoms.oti.tmp
+        	sed -i 's/1/H/g' atoms.oti.tmp
+        	sed -i 's/2/He/g' atoms.oti.tmp
+        	sed -i 's/3/Li/g' atoms.oti.tmp
+        	sed -i 's/4/Be/g' atoms.oti.tmp
+        	sed -i 's/5/B/g' atoms.oti.tmp
+        	sed -i 's/6/C/g' atoms.oti.tmp
+        	sed -i 's/7/N/g' atoms.oti.tmp
+       		sed -i 's/8/O/g' atoms.oti.tmp
+        	sed -i 's/9/F/g' atoms.oti.tmp
+	fi
+
+	if [ $(awk 'FNR=='$line-5',FNR=='$line'{print $0}' OFS='\t' $tmpfile | grep "Type" | awk '{print $1}') ]; then 		
+		awk 'FNR=='$line',FNR=='$line+$atoms-1'{print $4,$5,$6}' OFS='\t' $tmpfile > matrix.oti.tmp
+	else
+		awk 'FNR=='$line',FNR=='$line+$atoms-1'{print $3,$4,$5}' OFS='\t' $tmpfile > matrix.oti.tmp
+	fi
+	
+	sed -i 's/31/Ga/g' atoms.oti.tmp
+	sed -i 's/32/Ge/g' atoms.oti.tmp
+	sed -i 's/33/As/g' atoms.oti.tmp
+	sed -i 's/34/Se/g' atoms.oti.tmp
+	sed -i 's/35/Br/g' atoms.oti.tmp
+	sed -i 's/10/Ne/g' atoms.oti.tmp
+	sed -i 's/11/Na/g' atoms.oti.tmp
+	sed -i 's/12/Mg/g' atoms.oti.tmp
+	sed -i 's/13/Al/g' atoms.oti.tmp
+	sed -i 's/14/Si/g' atoms.oti.tmp
+	sed -i 's/15/P/g' atoms.oti.tmp
+	sed -i 's/16/S/g' atoms.oti.tmp
+	sed -i 's/17/Cl/g' atoms.oti.tmp
+	sed -i 's/18/Ar/g' atoms.oti.tmp
+	sed -i 's/1/H/g' atoms.oti.tmp
+	sed -i 's/2/He/g' atoms.oti.tmp
+	sed -i 's/3/Li/g' atoms.oti.tmp
+	sed -i 's/4/Be/g' atoms.oti.tmp
+	sed -i 's/5/B/g' atoms.oti.tmp
+	sed -i 's/6/C/g' atoms.oti.tmp
+	sed -i 's/7/N/g' atoms.oti.tmp
+	sed -i 's/8/O/g' atoms.oti.tmp
+	sed -i 's/9/F/g' atoms.oti.tmp
+	
+	paste atoms.oti.tmp matrix.oti.tmp | awk '{printf " %-3s %15s %15s %15s\n", $1, $2, $3, $4}' > final_matrix.oti.tmp
+	printf "\n" >> final_matrix.oti.tmp	
+	rm atoms.oti.tmp matrix.oti.tmp
+}
+
+
+SubstituteMatrix (){
+	line=$(awk '/Charge = /{ print NR+1}' $tmpfile | head -1)
+	sed -n "$line,$((line+atoms-1))p" $tmpfile > input_matrix.oti.tmp
+	Atom1_lab=$(awk 'FNR==1{print $1}' input_matrix.oti.tmp)
+	Atom1_x=$(awk 'FNR==1{print $2}' input_matrix.oti.tmp | grep -o -e '^[0-9]*\.[0-9][0-9]' -e '^-[0-9]*\.[0-9][0-9]')
+	Atom1_y=$(awk 'FNR==1{print $3}' input_matrix.oti.tmp | grep -o -e '^[0-9]*\.[0-9][0-9]' -e '^-[0-9]*\.[0-9][0-9]')
+	Atom1_z=$(awk 'FNR==1{print $4}' input_matrix.oti.tmp | grep -o -e '^[0-9]*\.[0-9][0-9]' -e '^-[0-9]*\.[0-9][0-9]')
+	inputfileline=$(awk '/'"$Atom1_lab"'/ && /'"$Atom1_x"'/ && /'"$Atom1_y"'/ && /'"$Atom1_z"'/{print NR}' "$OutputFileName".com | head -1)
+	if [ -z $inputfileline ]; then
+		StoppedBy Error "Couldn't replace matrix in the input file"
+	fi
+	sed -n "1,$((inputfileline-1))p" "$OutputFileName".com > new_input_file.oti.tmp
+	cat final_matrix.oti.tmp >> new_input_file.oti.tmp
+	sed -i '$d' new_input_file.oti.tmp
+	sed -n "$((inputfileline+atoms)),$(awk 'END{print NR}' "$OutputFileName".com)p" "$OutputFileName".com >> new_input_file.oti.tmp
+
+	mv new_input_file.oti.tmp $1
+	rm input_matrix.oti.tmp
+
+        Printf "Matrix successfully substituted\n"
+}
+
+
+MakeZMatr (){	
+	if [ $OptCalc -eq 0 ]; then
+		StoppedBy Error "Unfortunately I need an optimization output to do this. Stay tuned for updates"
+	fi
+	
+	if [ -z "$(grep "Optimized Parameters" $tmpfile)" ] && [ $CalcDone -eq 0 ]; then
+		StoppedBy Error "The job is still running or forcibly interrupted. I need a completed job"
+	elif [ -z "$(grep "Optimized Parameters" $tmpfile)" ] && [ $CalcDone -eq 1 ]; then
+		StoppedBy Error "Couldn't find the \"Optimized Parameters\" table"
+	elif [ -z "$(grep -A3 "Optimized Parameters" $tmpfile | tail -1 | grep "Definition")" ]; then
+		StoppedBy Error "Couldn't costruct the Z-Matrix. However it should be in the input file."
+	fi
+
+	OptParTableLine=$(awk '/Optimized Parameters/{ print NR+5}' $tmpfile | tail -1)
+	OptParTableLastLine=$(awk '/--------------------------------------------------------------------------------/{ print NR}' $tmpfile | tail -1)
+	
+	sed -n ''$OptParTableLine','$OptParTableLastLine'p' $tmpfile > OptParTable.oti.tmp
+	
+	CreateParametersTmp "R(" Distances.oti.tmp
+	CreateParametersTmp "A(" Angles.oti.tmp
+	CreateParametersTmp "D(" Dihedral.oti.tmp
+	
+	rm OptParTable.oti.tmp
+	
+	for i in $(seq 1 $atoms); do
+		printf "$i\n" >> AtomsLeft.oti.tmp
+		LabelTranslate[$i]=0
+	done
+	touch AtomsDone.oti.tmp
+	
+	CurrAtomLine=1	
+	CurrAtom=1
+	while [ $(wc -l AtomsDone.oti.tmp | awk '{print $1}') -lt $atoms ]; do
+		k=$(awk 'FNR=='$CurrAtomLine'{print $1}' AtomsLeft.oti.tmp)	#k is the atom label in the output file, while CurrAtom is the atom label in the future ZMatrix
+		ATOM=$(awk 'FNR=='$k'{print $1}' final_matrix.oti.tmp)
+		if [ $k -eq 1 ]; then
+			printf "$ATOM\n" >> ZMatrix.oti.tmp
+			NextAtom Chosen
+			continue
+		fi
+		
+		if [ "$(awk -v wanted="^$k$" '$3 ~ wanted' Distances.oti.tmp)" ]; then	
+			Line=$(awk -v wanted="^$k$" '$3 ~ wanted' Distances.oti.tmp | awk 'FNR==1{print $1}')
+			Datom=$(awk 'FNR=='$Line'{print $2}' Distances.oti.tmp)
+		else
+			StoppedBy Error "Connectivity is messed up. Sorry"
+		fi
+
+		IsItPresent $Datom
+		Distance=$(awk 'FNR=='$Line'{print $4}' Distances.oti.tmp)	
+		if [ $k -eq 2 ]; then
+                        printf "$ATOM\t${LabelTranslate[$Datom]}\t$Distance\n" >> ZMatrix.oti.tmp
+			NextAtom Chosen
+                        continue
+                fi
+	
+		if [ "$(awk -v wanted="^$k$" '$4 ~ wanted' Angles.oti.tmp | awk -v wanted="^$Datom$" '$3 ~ wanted')" ]; then
+			Line=$(awk -v wanted="^$k$" '$4 ~ wanted' Angles.oti.tmp | awk -v wanted="^$Datom$" '$3 ~ wanted' | awk 'FNR==1{print $1}')	
+			Aatom=$(awk 'FNR=='$Line'{print $2}' Angles.oti.tmp)
+		elif [ "$(awk -v wanted="^$k$" '$2 ~ wanted' Angles.oti.tmp | awk -v wanted="^$Datom$" '$3 ~ wanted')" ]; then
+                        Line=$(awk -v wanted="^$k$" '$2 ~ wanted' Angles.oti.tmp | awk -v wanted="^$Datom$" '$3 ~ wanted' | awk 'FNR==1{print $1}')
+                        Aatom=$(awk 'FNR=='$Line'{print $4}' Angles.oti.tmp)
+		else
+			StoppedBy Error "Couldn't find an atom that forms an angle with the ($Datom,$k) set"
+                fi
+
+		IsItPresent $Aatom
+		Angle=$(awk 'FNR=='$Line'{print $5}' Angles.oti.tmp)
+		if [ $k -eq 3 ]; then
+                        printf "$ATOM\t${LabelTranslate[$Datom]}\t$Distance\t${LabelTranslate[$Aatom]}\t$Angle\n" >> ZMatrix.oti.tmp
+			NextAtom Chosen
+                        continue
+                fi
+
+	if [ "$(awk -v wanted="^$k$" '$5 ~ wanted' Dihedral.oti.tmp | awk -v wanted="^$Datom$" '$4 ~ wanted' | awk -v wanted="^$Aatom$" '$3 ~ wanted')" ]; then
+                Line=$(awk -v wanted="^$k$" '$5 ~ wanted' Dihedral.oti.tmp | awk -v wanted="^$Datom$" '$4 ~ wanted' | awk -v wanted="^$Aatom$" '$3 ~ wanted' | awk 'FNR==1{print $1}')
+		Hatom=$(awk 'FNR=='$Line'{print $2}' Dihedral.oti.tmp)
+	elif [ "$(awk -v wanted="^$Aatom$" '$4 ~ wanted' Dihedral.oti.tmp | awk -v wanted="^$Datom$" '$3 ~ wanted' | awk -v wanted="^$k$" '$2 ~ wanted')" ]; then
+		Line=$(awk -v wanted="^$Aatom$" '$4 ~ wanted' Dihedral.oti.tmp | awk -v wanted="^$Datom$" '$3 ~ wanted' | awk -v wanted="^$k$" '$2 ~ wanted' | awk 'FNR==1{print $1}')
+		Hatom=$(awk 'FNR=='$Line'{print $5}' Dihedral.oti.tmp)
+	else
+		StoppedBy Error "Couldn't find an atom that forms a dihedral angle with the ($Aatom,$Datom,$k) set"
+	fi
+		
+		IsItPresent $Hatom
+                Dihedral=$(awk 'FNR=='$Line'{print $6}' Dihedral.oti.tmp)
+		printf "$ATOM\t${LabelTranslate[$Datom]}\t$Distance\t${LabelTranslate[$Aatom]}\t$Angle\t${LabelTranslate[$Hatom]}\t$Dihedral\n" >> ZMatrix.oti.tmp
+		NextAtom Chosen
+              	continue
+	done
+
+	rm Distances.oti.tmp Angles.oti.tmp Dihedral.oti.tmp AtomsLeft.oti.tmp AtomsDone.oti.tmp
+	printf "\n" >> ZMatrix.oti.tmp
+	Printf "Z-Matrix:\n\n"
+	awk '{printf " %-3s %6s %10s %6s %14s %6s %12s\n", $1, $2,$3,$4,$5,$6,$7}' ZMatrix.oti.tmp
+	rm ZMatrix.oti.tmp 
+}
+
+
+CreateParametersTmp (){
+	grep "$1" OptParTable.oti.tmp | awk '{print $3,$4}' > temp.oti.tmp
+	for i in $(seq 1 $(awk '{print NR}' temp.oti.tmp | tail -1)); do
+		SeparatedAtoms=$(awk 'FNR=='$i'{print $1}' temp.oti.tmp | sed -e 's/[^0-9]/ /g' -e 's/^ *//g' -e 's/ *$//g' | tr -s ' ' | sed 's/ /\t/g')
+		printf "$i\t$SeparatedAtoms\t$(awk 'FNR=='$i'{print $2}' temp.oti.tmp)\n" >> $2 
+	done
+	rm temp.oti.tmp
+}	
+
+
+NextAtom (){
+	if [ $1 == "Chosen" ]; then
+		sed -i ''$CurrAtomLine'd' AtomsLeft.oti.tmp
+		printf "$k\n" >> AtomsDone.oti.tmp
+		LabelTranslate[$k]=$CurrAtom
+		CurrAtom=$((CurrAtom+1))
+		CurrAtomLine=1
+	elif [ $1 == "TryAgain" ]; then
+		CurrAtomLine=$((CurrAtomLine+1))
+		continue
+	fi
+}
+
+
+IsItPresent (){
+	isitfound=0
+	for p in $(seq 1 $(wc -l AtomsDone.oti.tmp | awk '{print $1}')); do
+		if [ $1 -eq $(awk 'FNR=='$p'' AtomsDone.oti.tmp) ]; then
+			isitfound=1		
+	fi
+	done
+
+	if [ $isitfound -eq 0 ]; then
+		NextAtom TryAgain
+	fi
+}
+
+
+ShuffleInputMatrix (){
+	Printf "Shuffling input matrix..."
+
+
+
+}
+
+
+
+
+
+
+
+
+
+#Program begins  ----------------------------------------------------------------------------------------------------
+
+
+
+
+if [ "$(ls | grep ".oti.tmp")" ]; then
+	rm *.oti.tmp
+fi
+
+
+String=$(echo "$*")
+NF=$(echo "$*" | awk '{print NF}')      #Number of input variables
+
+for j in $String; do
+	if [ $j == "-m" ] || [ $j == "--mute" ]; then
+		MutedMode=1
+		String=$(printf '%s\n' "${String//$j/}")
+	fi
+	if [ $j == "-n" ] || [ $j == "--nostatus" ]; then
+		NoStatus=1
+		String=$(printf '%s\n' "${String//$j/}")
+	fi
+	if [ $j == "-y" ] || [ $j == "--yes" ]; then
+		YesMode=1
+		String=$(printf '%s\n' "${String//$j/}")
+	fi
+	if [ $j == "-j" ] || [ $j == "--status" ]; then
+		PrintStatus=1
+	fi
+	if [ $j == "-i" ] || [ $j == "--info" ]; then
+		PrintStatus=1
+	fi
+	if [ $j == "--input-orient" ]; then
+		InputOrient=1
+		String=$(printf '%s\n' "${String//$j/}")
+	fi
+done
+
+#Graphic
+
+GetOutputFile	#it does what it says
+
+GetNumberOfAtoms
+
+AnalyzeOutput 	#if the calculation is finished, number of steps, etc
+
+ReadUserOptions #read input and execute the tasks that don't require to print a matrix
+
+GetMatrixLineNumber
+
+WriteAtomMatrix
+
+if [ $NextInput -eq 1 ]; then
+	if ! [ -e $InputFileName ]; then
+		if [ ! -e "$OutputFileName".$INPext ]; then
+                	StoppedBy Error ""$OutputFileName".$INPext must exists in order to create $InputFileName"
+		fi
+		cp "$OutputFileName".$INPext $InputFileName
+		SubstituteMatrix $InputFileName
+	else
+		SubstituteMatrix $InputFileName
+	fi
+elif [ $Redo -eq 1 ]; then
+	if [ ! -e "$OutputFileName".$INPext ]; then
+		StoppedBy Error ""$OutputFileName".com must exists"
+	fi
+	
+	AskQuestion "Are you sure to replace matrix in the input file ("$OutputFileName".com)?"
+	SubstituteMatrix "$OutputFileName".com
+
+elif [ $MakeXYZ -eq 1 ]; then
+        if [ -e "$OutputFileName".xyz ]; then
+		AskQuestion ""$OutputFileName".xyz already exists. Overwrite it?"
+        fi
+        printf "$atoms\n\n" > "$OutputFileName".xyz
+        cat final_matrix.oti.tmp >> "$OutputFileName".xyz
+        Printf ""$OutputFileName".xyz created\n\n"
+elif [ $MakeZMatrix -eq 1 ]; then
+	MakeZMatr
+else	
+	Printf "Requested matrix:\n\n"
+	Printf "$atoms\n\n"
+	Charge=$(awk '/Charge =/{print $3}' $tmpfile | head -1)
+	Multiplicity=$(awk '/Charge =/{print $6}' $tmpfile | head -1)
+	#echo "$Charge $Multiplicity" 
+	cat final_matrix.oti.tmp
+fi
+
+if [ $Shuffle -eq 1 ]; then
+	ShuffleInputMatrix
+fi
+
+rm final_matrix.oti.tmp $tmpfile

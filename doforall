@@ -1,0 +1,117 @@
+#!/bin/bash
+
+#Usage:	doforall [Command]:		for i in $(ls); do [Command(s)] $i; done
+#	doforall "*.log" [Command]:	for i in $(ls *log); do [Command(s)] $i; done
+#       doforall "*.log" [Command] -n:     for i in $(ls *log); do [Command(s)]; done
+#	-M (after [Command]): mute mode, just prints the output(s)
+
+# Reset
+NC='\033[0m'       # Text Reset
+
+# Regular Colors
+Bla='\033[0;30m'        # Black
+Red='\033[0;31m'          # Red
+Gre='\033[0;32m'        # Green
+Yel='\033[0;33m'       # Yellow
+Blu='\033[0;34m'         # Blue
+Pur='\033[0;35m'       # Purple
+Cya='\033[0;36m'         # Cyan
+Whi='\033[0;37m'        # White
+Gry='\033[2;30m'        # Grey
+
+noi=0
+
+
+Printf () {
+if [ $MuteMode -eq 0 ]; then
+	if [ "$1" == "Command" ]; then
+		if [ "$2" == "all" ]; then
+			echo -e "for i in \$(ls); do ${Red}$files${NC} \$i; done"
+	                echo ""
+		elif [ "$2" == "spec" ]; then
+			echo -e "for i in \$(ls ${Gre}$files${NC}); do ${Red}$Cmd${NC} \$i; done"
+			echo ""
+		elif [ "$2" == "allwoi" ]; then
+			echo -e "for i in \$(ls); do ${Red}$files${NC}; done"
+                        echo ""
+		elif [ "$2" == "specwoi" ]; then
+			echo -e "for i in \$(ls ${Gre}$files${NC}); do ${Red}$Cmd${NC}; done"
+			echo ""
+		fi
+	else
+		printf "$1"
+	fi
+fi
+
+}
+
+
+String=$*
+
+if [ "$(echo "$String" | grep "\-M")" ]; then
+	MuteMode=1
+	String=$(printf '%s\n' "${String//"-M"/}")
+else
+	MuteMode=0
+fi
+
+if [ "$(echo "$String" | grep "\-n")" ]; then
+	noi=1
+	String=$(printf '%s\n' "${String//"-n"/}")
+fi
+
+NF=$(echo "$String" | awk '{print NF}')
+
+if [ $NF -ge 3 ]; then
+	for f in $(seq 1 $((NF-1))); do
+		files=$(echo "$files$(echo "$String" | awk '{print $'$f'}') ")
+	done
+	Cmd=$(echo "$String" | awk '{print $'$NF'}')
+else
+	files=$(echo "$String" | awk '{print $1}')
+	Cmd=$(echo "$String" | awk '{print $2}')
+fi
+
+
+if [ -z "$files" ] || [ "$files" == "-h" ]; then
+	printf "\nUsage:\n\tdoforall \"[Command(s)]\":		for i in \$(ls); do [Command] \$i; done
+	doforall \"[pattern]\" \"[Command(s)]\":	for i in \$(ls [pattern]); do [Command] \$i; done\n\n"
+	exit
+fi
+
+
+Printf "\n>>>>> "
+
+if [ $noi -eq 0 ]; then
+	if [ -z "$Cmd" ]; then
+		Printf "Command" "all"
+		for i in $(ls); do
+			Printf "  >>> $files $i\n"
+		        $files $i
+			Printf "\n"
+		done
+	else
+		Printf "Command" "spec"
+		for i in $(ls $files); do
+			Printf "  >>> $Cmd $i\n"
+			$Cmd $i
+			Printf "\n"
+		done
+	fi
+else
+	if [ -z "$Cmd" ]; then
+		Printf "Command" "allwoi"
+                for i in $(ls); do
+                        Printf "  >>> $files"
+                        $files
+			Printf "\n"
+                done
+        else
+		Printf "Command" "specwoi"
+                for i in $(ls $files); do
+                        Printf "  >>> $Cmd"
+                        $Cmd
+			Printf "\n"
+                done
+        fi 
+fi

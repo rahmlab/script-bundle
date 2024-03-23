@@ -1,0 +1,191 @@
+#!/bin/bash
+
+MuteMode=0
+SuperMuteMode=0
+ZPE=0
+Gibbs=0
+GibbsCorr=0
+Enthalpy=0
+FoundFiles=0
+Hartree=0
+Stoic=0
+Stoicnum=0
+Prec=6
+QH=0
+extraarg=""
+CustTemp=0
+Temp=0
+
+CheckEnding(){
+if [ "$(head $1 | grep "Gaussian, Inc.")" ]; then
+        if [ -z $(grep "Normal term" $1 | awk 'FNR==1{print $1}') ]; then
+                if [ $MuteMode -eq 0 ]; then
+                        printf "\nWarning: $1 didn't terminate right (or yet)!\n\n"
+		elif [ $SuperMuteMode -eq 0 ]; then
+                        printf "!"
+                fi
+                if [ $arg ]; then
+                        if [ $MuteMode -eq 0 ]; then
+                                printf "\nSecond warning: you can't ask for $arg in this case!\n"
+			elif [ $SuperMuteMode -eq 0 ]; then
+                                printf "X"
+                        fi
+                        exit
+                fi
+	fi
+fi
+
+	
+}
+
+
+
+if [ -z $1 ] || [ $1 == "-h" ]; then
+        printf "\nDeltaE of Gaussian or ORCA output files. Use:\n\n"
+	printf " DeltaE  [ output file(s) (incl. ext.) ]  [ Request(s) (optional) ]   (Order of output files is relevant!)\n\n"
+        printf "Requests:\n\n"
+        printf " [none]\t\t\t- DeltaE of last electronic energies (E) in kcal/mol. Only for number of output files N = 2\n"
+        printf " -m/--mute\t\t- Mute mode: do not print errors, but symbols in case something goes wrong\n"
+        printf " -M/--supermute\t\t- do not print errors NOR symbols in case something goes wrong (use it with caution!)\n\n"
+        printf " -a/--hartree\t\t- print delta energy in Hartree\n"
+        printf " --eV\t\t\t- print delta energy in eV\n\n"
+        printf " -z/--zpe\t\t- use E + ZPE\n"
+        printf " -H/--enthalpy\t\t- use enthalpy (E + H)\n"
+        printf " -G/--gibbs\t\t- use Gibbs free energy (E + G_corr). Print an error if not available\n"
+        printf " -c/--gcorr\t\t- use thermal correction to Gibbs free energy (G_corr)\n"
+        printf " -q/--quasiharmonic\t- use quasi-harmonic Gibbs free energy. It needs goodvibes python package\n"
+        printf " \t-T [integer]\t- (after -q) specifies temperature\n\n"
+        printf " -s/--stoic [integers]\t- define stoichiometry. The number of intergers must be equivalent to N\n"
+	printf " -A/--per-atom\t\t- calculate differences of atomic energies\n\n"
+
+        printf "\n"
+	exit
+fi
+
+
+String=$(echo $*)
+
+
+for i in $String; do
+	if [ $i == "-m" ]; then
+                MuteMode=1
+	elif [ $i == "-M" ]; then
+		MuteMode=1
+		SuperMuteMode=1
+        elif [ $i == "-z" ] || [ $i == "--zpe" ]; then
+                ZPE=1
+		if [ $arg ]; then
+			echo "Warning: overriding $arg with $i. Please use only one argument!"
+		fi
+		arg=$i
+	elif [ $i == "-G" ] || [ $i == "-g" ] || [ $i == "--gibbs" ]; then
+		Gibbs=1
+		if [ $arg ]; then
+                        echo "Warning: overriding $arg with $i. Please use only one argument!"
+                fi
+		arg=$i
+	elif [ $i == "-c" ] || [ $i == "--gcorr" ]; then
+		GibbsCorr=1
+		if [ $arg ]; then
+                        echo "Warning: overriding $arg with $i. Please use only one argument!"
+                fi
+		arg=$i
+	elif [ $i == "-H" ] || [ $i == "--enthalphy" ]; then
+                Enthalpy=1
+		if [ $arg ]; then
+                        echo "Warning: overriding $arg with $i. Please use only one argument!"
+                fi
+		arg=$i
+	elif [ $i == "-a" ] || [ $i == "--hartree" ]; then
+		Hartree=1
+		Prec=9
+	elif [ $i == "-s" ] || [ $i == "--stoic" ]; then
+                Stoic=1
+	elif [ $i == "-q" ] || [ $i == "--quasiharmonic" ]; then
+		QH=1
+	elif [ $(echo $i | grep "^[0-9]*") ] && [ $Stoic -eq 1 ]; then
+		StoicValues+=("$i")
+	elif [ $(echo $i | grep ".out\|.log") ] || [ $(echo $i | grep "OUTCAR") ]; then
+		if [ ! -e $i ]; then
+			echo "$i doesn't exist!"
+			exit
+		fi
+		Files+=("$i")
+	elif [ $i == "-T" ]; then
+	       CustTemp=1
+        elif [ $CustTemp -eq 1 ] && [[ $i =~ $re ]]; then
+               Temp=$i	       
+        elif [ $i == "-A" ] || [ $i == "--per-atom" ]; then
+		extraarg="-A"
+	else
+		echo "Can't understand $i"
+		exit
+        fi
+	
+done
+
+if [ ${#Files[@]} -eq 0 ]; then
+	echo "Error: I need at least one file"
+	exit
+elif [ ${#Files[@]} -ge 3 ] && [ ${#StoicValues[@]} -eq 0 ]; then
+	echo "Error: I need stoichiometry with 3 or more files"
+	echo "Example:    DeltaE file1.out file2.out file3.out -Stoic 1 1 -2"
+        exit
+fi
+
+if [ $Stoic -eq 1 ] && [ ${#StoicValues[@]} -eq 0 ]; then
+	echo "Error: -Stoic needs some numbers after it"
+	echo "Example:    DeltaE file1.out file2.out file3.out -Stoic 1 1 -2"
+        exit
+elif [ $Stoic -eq 1 ] && [ ${#Files[@]} -ne ${#StoicValues[@]} ]; then
+	echo "Error: Stoichiometry values must respect the number of files"
+	echo "Example:    DeltaE file1.out file2.out file3.out -Stoic 1 1 -2"
+	exit
+fi
+	
+
+for k in ${Files[@]}; do
+	CheckEnding $k
+	if [ $QH -eq 1 ]; then
+		if [ $Hartree -eq 0 ]; then
+			if [ $CustTemp -eq 0 ]; then 
+				Energies+=("$(LastEnergy $extraarg $arg $k -q)")
+			else
+				Energies+=("$(LastEnergy $extraarg $arg $k -q -T $Temp)")
+			fi
+		else
+			if [ $CustTemp -eq 0 ]; then
+				Energies+=("$(LastEnergy $extraarg $arg $k -q --hartree)")
+			else
+				Energies+=("$(LastEnergy $extraarg $arg $k -q --hartree -T $Temp)")
+			fi
+		fi
+	else
+		if [ $Hartree -eq 0 ]; then
+                        Energies+=("$(LastEnergy $extraarg $arg $k)")
+                else
+                        Energies+=("$(LastEnergy $extraarg $arg $k --hartree)")
+                fi
+	fi
+done
+
+
+if [ $Stoic -eq 0 ]; then
+	if [ ${#Files[@]} -eq 1 ]; then
+		Fammi -f $Prec "${Energies[0]}"
+	else
+		Fammi -f $Prec "${Energies[0]} - ${Energies[1]}"
+	fi
+else
+	TmpEnergy=0
+	for n in $(seq 0 $((${#Energies[@]}-1))); do
+		TmpEnergy=$(Fammi "$TmpEnergy + ${StoicValues[$n]} * ${Energies[$n]}")
+	done
+	echo $TmpEnergy
+fi
+
+
+
+
+
+

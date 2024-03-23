@@ -1,0 +1,69 @@
+#!/bin/bash
+
+arg=$1
+
+PrintUsage (){
+	echo "Usage: ChangeFileNames [-s, -c] [OldString] [NewString]"
+        echo "ChangeFileNames [-s, -c] [OldString] [NewString]"
+        echo "or"
+        echo "ChangeFileNames -i [OldString] [NewString] [Filename]"
+        exit
+}
+
+
+if ( [ "$#" -le 2 ] ) || ( [ $arg != "-s" ] && [ $arg != "-c" ] && [ $arg != "-i" ] ); then
+	PrintUsage
+fi 
+
+if ( [ $arg == "-s" ] || [ $arg == "-c" ] ) && [ "$#" -ne 3 ]; then
+	echo "Error."
+	PrintUsage
+elif [ $arg == "-i" ] && [ "$#" -lt 4 ]; then
+	echo "Error."
+	PrintUsage
+fi
+
+String=$2
+Replace=$3
+
+if [ $arg == "-i" ]; then
+	if [ $# -eq 4 ]; then
+		Filename=$4
+		Files=1
+	else
+		Files=$(($#-3))
+		echo "$Files files"
+	fi
+fi
+
+if [ $arg == "-s" ] || [ $arg == "-c" ]; then
+	for i in $(ls -d *$String*); do
+		NewName=${i/"$String"/"$Replace"}
+		if [ -e $NewName ]; then
+			echo "Warning: $NewName already exists. Overwrite it? (y/any key)"
+			read Ans
+			if [ $Ans != "y" ] && [ $Ans != "Y" ]; then
+				echo "Program stopped and no file has been deleted."
+				exit
+			fi
+		fi
+		if [ $arg == "-s" ]; then
+			mv $i $NewName
+		elif [ $arg == "-c" ]; then
+			cp $i $NewName
+		else
+			PrintUsage
+		fi
+	done
+
+elif [ $arg == "-i" ]; then
+	if [ ! -e $Filename ]; then
+       		echo "Error."
+            	PrintUsage
+     	fi
+	ARGS=("$@")
+	for i in $(seq 3 $((2+Files))); do
+		Filename=${ARGS[$i]}
+		sed -i 's@'$String'@'$Replace'@g' $Filename
+	done
+fi

@@ -1,0 +1,26 @@
+#!/bin/bash
+
+
+
+if [ "$(echo $PWD | grep "Hebbe")" ]; then
+	server=hebbe2
+elif [ "$(echo $PWD | grep "Vera")" ]; then
+        server=vera2
+else
+        server=vera1
+fi
+
+if [ "$1" ] && [ -d "$1" ]; then
+	printf "scp -r "
+else
+	printf "scp "
+fi
+
+printf "$USER@"$server".c3se.chalmers.se:$PWD"
+
+if [ "$1" ]; then
+	printf "/$1 .\n"
+else
+	printf " .\n"
+fi
+

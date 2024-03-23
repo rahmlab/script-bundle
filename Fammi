@@ -1,0 +1,27 @@
+#!/bin/bash
+
+
+if [ "$1" == "-f" ]; then
+	Prec=$2		
+	String=$(echo "$*" | awk '{$1=$2=""; print $0}')
+elif [ -z "$1" ] || [ "$1" == "-h" ]; then
+	printf "\nFammi - simple calculator. Usage:\n\n"
+	printf "\tFammi [-f integer] \"[expression]\"\n"
+	printf "\t\t-f integer: define floating point precision (optional, default=6)\n\n"
+	printf "\tExample: Fammi \"2+4\"\n\n"
+	exit	
+else
+	Prec=6
+	String=$(echo "$*")
+fi
+
+if [ "$(ls)" ] && [ $(echo "$String" | grep "$(ls * | awk 'FNR==1{print $1}')" | awk '{print $1}') ]; then
+	echo "Errore: usa \* per le moltiplicazioni, oppure virgoletta l'intera espressione"
+	exit
+elif [ -z $(echo $String | awk '{print $1}') ]; then
+	echo "Errore: virgoletta l'intera espressione"
+fi
+
+NF=$(echo "$*" | awk '{print NF}')
+
+awk 'BEGIN{printf ( "%1.'$Prec'f\n", '"$String"' )}'
