@@ -1,0 +1,130 @@
+export jobin=$SLURM_JOB_NAME
+
+
+#Load AutoDE
+#if [ $part == "veralux" ] ; then
+#	source /cephyr/users/marcocap/Vera/venv/bin/activate
+#	module load GCC/10.3.0 OpenMPI/4.1.1-GCC-10.3.0 Python/3.9.5-GCCcore-10.3.0\
+#                        SciPy-bundle/2021.05-foss-2021a matplotlib/3.4.2-foss-2021a networkx/2.5.1-foss-2021a gaussian/16.B.01-AVX2
+#else
+#	source /cephyr/users/marcocap/Vera/venv/bin/activate
+#	module load GCC/10.3.0 OpenMPI/4.1.1-GCC-10.3.0 Python/3.9.5-GCCcore-10.3.0\
+#                        SciPy-bundle/2021.05-foss-2021a matplotlib/3.4.2-foss-2021a networkx/2.5.1-foss-2021a gaussian/16.B.01-AVX2
+#	source /cephyr/users/marcocap/Vera/venv_autode/bin/activate
+#fi
+
+source /cephyr/users/marcocap/Vera/venv/bin/activate
+#module load GCC/11.3.0 Python/3.10.4-GCCcore-11.3.0 SciPy-bundle/2022.05-foss-2022a\
+#                matplotlib/3.5.2-foss-2022a ASE/3.22.1-foss-2022a GPAW/22.8.0-foss-2022a && source ~/venv/bin/activate
+
+#Load G16
+module load gaussian/16.B.01-AVX2
+export GAUSS_SCRDIR=$TMPDIR/
+
+#Load XTB
+#source /cephyr/NOBACKUP/groups/snic2020-6-11/ruizf/xtb/xtb_current/share/xtb/config_env.bash
+
+#Configure AutoDE
+export AUTODE_LOG_LEVEL=INFO
+export AUTODE_LOG_FILE=autode_${jobin%py}.log
+ulimit -s unlimited
+export OMP_STACKSIZE=4G
+export OMP_MAX_ACTIVE_LEVELS=1
+
+cd $SLURM_SUBMIT_DIR
+
+python $jobin.py
+
+ConfCalc=0
+
+Nmol=$(grep "ade.Molecule" AUTODE_*.py | awk 'END{print NR}')
+Nspecies=$(grep "ade.NCIComplex" AUTODE_*.py | cut -d '(' -f 2 | awk -F ',' '{print NF-1}')
+
+if [ $Nmol -eq 1 ] && [ -z $Nspecies ]; then
+	echo "Conformer calculation"
+	ConfCalc=1
+	MOL=$(grep "ade.Molecule" AUTODE_*.py | awk 'FNR==1{print $1}')
+elif [ -z $Nspecies ] && [ $Nmol -ne 1 ]; then
+	echo "Error: no NCIComplex but not 1 species"
+	exit
+elif [ $Nmol -ge 2 ]; then
+	for mol in $(seq 1 $Nmol); do
+		MOL+=($(grep "ade.Molecule" AUTODE_*.py | awk 'FNR=='$mol'{print $1}'))
+	done
+	for spec in $(seq 1 $Nspecies); do
+		SPECIES+=($(grep "ade.NCIComplex" AUTODE_*.py | cut -d '(' -f 2 | awk -F ',' '{print $'$spec'}' | tr -d ' '))
+	done
+fi
+
+echo "Molecules: ${MOL[@]}"
+echo "Species: ${SPECIES[@]}"
+echo ""
+
+#Get reference energies
+if [ $ConfCalc -eq 1 ]; then
+	El_ref=$(LastEnergy $(ls *_conf*_opt_g16.log | awk 'FNR==1'))
+	G_ref=$(LastEnergy -g -q $(ls *_conf*_opt_g16.log | awk 'FNR==1'))
+else
+	El_ref=0
+	G_ref=0
+	for spec in ${SPECIES[@]}; do
+		if [ -e "$spec"_opt_g16.log ]; then file="$spec"_opt_g16.log; elif [ -e "$spec"_sp_g16.log ]; then file="$spec"_sp_g16.log; else echo "Error"; exit; fi
+                El_ref=$(Fammi -f 2 "$El_ref + $(LastEnergy -M $file)")
+                G_ref=$(Fammi -f 2 "$G_ref + $(LastEnergy -M -q -T 278 $file)")
+	done
+fi
+
+echo "El_ref: $El_ref"
+echo "G_ref: $G_ref"
+echo ""
+
+#Check and re-run
+for i in $(ls *_conf*.log); do
+        if [ -e $(echo "${i:: -4}_restart.log") ]; then
+                echo "$i has already been restarted. Skip"
+                continue
+        elif [ -z "$(tail -n1 $i | grep "Normal termination")" ] && [ -z "$(echo $i | grep "restart")" ]; then
+                echo "WARNING: $i did not ended correctly. I'll try to restart it..."
+                NewInpName=$(echo "${i:: -4}_restart.com")
+                NewOutName=$(echo "${i:: -4}_restart.log")
+                OutputToInput $i -in $NewInpName -m
+                g16 $NewInpName > $NewOutName
+                if [ -z "$(tail -n1 $NewOutName | grep "Normal termination")" ]; then
+                        echo "Still not ended correctly... Forget about it"
+                else
+                        echo "Ended correctly"
+                        FileNames+=($NewOutName)
+                        El_Energies+=($(Fammi -f 2 " $(LastEnergy $NewOutName -M) - $El_ref "))
+                        G_Energies+=($(Fammi -f 2 " $(LastEnergy $NewOutName -q -T 278 -M) - $G_ref "))
+                fi
+        elif [ -z "$(tail -n1 $i | grep "Normal termination")" ] && [ "$(echo $i | grep "restart")" ]; then
+                echo "$i: Restarted but still not ended correctly. Nevermind."
+                continue
+        else
+		FileNames+=($i)
+                El_Energies+=($(Fammi -f 2 " $(LastEnergy $i -M) - $El_ref "))
+                G_Energies+=($(Fammi -f 2 " $(LastEnergy $i -q -T 278 -M) - $G_ref "))
+	fi
+done
+
+
+
+for lab in $(seq 0 ${#G_Energies[@]}); do
+  printf "${FileNames[$lab]}\t${El_Energies[$lab]}\t${G_Energies[$lab]}\n" >> finalen.tmp.oti
+done
+
+
+echo "Final energies, in order of DeltaG (278K):"
+
+printf "\n\nName\t\t\t\t"
+if [ $Nspecies -eq 3 ]; then
+	printf "\t"
+elif [ $Nspecies -eq 4 ]; then
+	printf "\t\t"
+fi
+printf "DeltaE\tDeltaG\n"
+sort -k3n -k2n finalen.tmp.oti
+rm finalen.tmp.oti
+
+printf "\n"
+

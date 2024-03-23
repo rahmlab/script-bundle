@@ -1,0 +1,6 @@
+module load gaussian/16.B.01-AVX2
+export GAUSS_SCRDIR=$TMPDIR/
+
+g16 $SLURM_JOB_NAME.com > $SLURM_JOB_NAME.log
+
+
