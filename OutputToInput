@@ -17,7 +17,7 @@ if [ ! "$1" ] || [ "$1" == -h ]; then
 	printf " -y/--yes\t\t- Yes mode: implicitly say yes to every question\n"
 	printf "\n"
 	printf " [none]\t\t\t- Print last geometry of the output file\n"
-	printf " -j/--status\t\t- Print just the status of the calculation (default for every option, except in mute mode and --nostatus)\n"
+	printf " -j/--status\t\t- Print just the status of the calculation (default for every option, except in mute mode)\n"
 	printf " -i/--info\t\t- Print status and additional info about the output file\n"
 	#printf " -n/--nostatus\t\t- Do not print the status of the calculation\n"
 	#printf " -l/--last\t\t- Print last geometry of the output file\n"
