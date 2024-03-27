@@ -24,7 +24,7 @@ if [ ! "$1" ] || [ "$1" == -h ]; then
 	printf " -s/--step [Step number]- Print matrix of the specified optimization or scan (if a scan or relaxed scan) step\n"
 	printf " -r/--redo\t\t- Take last geometry and substitute it in the input file ([filename].$INPext)\n"
 	printf " -in [filename].inp\t- Place input keywords and last geometry in [filename].$INPext, which may or may not exist. If it exists, it will be overwritten.\n"
-	printf " -S/--shuffle\t\t- Same as --redo but shuffling a little bit the atom coordinates (for stuck jobs)\n"
+	#printf " -S/--shuffle\t\t- Same as --redo but shuffling a little bit the atom coordinates (for stuck jobs)\n"
 	printf " -xyz\t\t\t- Generate [filename].xyz with last geometry\n"
 	printf " -z/--zmatrix\t\t- Print Z-Matrix of last geometry\n"
 	printf " -C/--Converged\t\t- Print \"Converged?\" table for each step and ask which optimization step to print\n"
