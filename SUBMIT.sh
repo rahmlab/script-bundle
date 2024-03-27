@@ -195,15 +195,13 @@ for i in $(seq 1 $NF); do
 			SkipNext=1;;
 		test)
 			Time=00:10:00
-			Cluster=lux
 			Cores=8
 			ReqCores=1
 			Memory=16
 			ReqMem=1
 			;;
 		short)
-			Time=01:00:00
-			Cluster=lux	
+			Time=01:00:00	
 			Cores=16
                         ReqCores=1
                         Memory=32
