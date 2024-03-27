@@ -38,9 +38,9 @@ if [ -z "$1" ] || [ "$1" == "-h" ]; then
 	printf " -g/--gibbs\t\t- print Gibbs free energy (E + G_corr). Print an error if not available\n"
 	printf " -c/--gcorr\t\t- print thermal correction to Gibbs free energy (G_corr)\n"
 	printf " -q/--quasiharmonic\t- print quasi-harmonic Gibbs free energy. It needs goodvibes python package\n"
-	printf " \t-T [integer]\t- (after -q) specifies temperature\n\n"
-	printf " -A/--per-atom\t - divide the final output by number of atoms\n"
-	printf " -d/--div [integer]\t\t- divide the final output by integer\n\n"
+	printf " -T [integer]\t\t- (after -q) specifies temperature\n\n"
+	printf " -A/--per-atom\t\t- divide the final output by number of atoms\n"
+	printf " -d/--div [integer]\t- divide the final output by integer\n\n"
 	
         printf "\n"
 	exit
