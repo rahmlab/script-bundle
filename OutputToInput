@@ -760,23 +760,23 @@ ReadUserOptions (){
 			exit
 		elif [ $CurrStr == "--Energy" ] || [ $CurrStr == "-E" ]; then
 			Printf "print computed energy of all steps\n\n"
-			printf "Step\tE (kcal/mol)\tDE (kcal/mol)\tEnergy change\tPercent change\n"
-			for m in $(seq 1 $Steps); do
-				E_currm=$(grep  "E([R,U]" $tmpfile | awk 'FNR=='$m+1'{printf ( "%.4f\n", $5 * '$kH' )}')
-                       		printf "$m:\t$E_currm\t"
-				if [ $m -gt 1 ]; then
-					deltaEfirst=$(awk 'BEGIN{printf ( "%.2f\n", '$E_currm' - '$E_first'  )}')
-					deltaEprec=$(awk 'BEGIN{printf ( "%.2f\n", '$E_currm' - '$E_precm'  )}')
-					perc_change=$(awk 'BEGIN{printf ( "%.2e\n", ( '$E_currm' - '$E_precm' ) / '$E_precm'  * 100 )}')
-					printf -- "$deltaEfirst\t\t$deltaEprec\t\t$perc_change\n"
-				elif [ $m -eq 1 ]; then
-					E_first=$E_currm
-					printf -- "0.00\n"
-				else
-					printf "\n"
-				fi
-				E_precm=$E_currm
-                	done
+			printf "Step\tE (kcal/mol)\tDE step\t Perc change\n"
+                        E_first=$(grep  "E([R,U]" $tmpfile | awk 'FNR==1{printf ( "%.6f\n", $5 * '$kH'  )}')
+                        E_0=$(grep  "E([R,U]" $tmpfile | awk 'FNR==1{printf ( "%.3f\n", $5 * '$kH'  )}')
+                        echo "1:" $E_0 | awk '{printf "%4s %14s\n", $1, $2}'
+                        for m in $(seq 2 $Steps); do
+                                E_currm=$(grep  "E([R,U]" $tmpfile | awk 'FNR=='$m'{printf ( "%.6f\n", $5 * '$kH'  )}')
+                                if [ $m -eq 2 ]; then
+                                        E_precm=$E_first
+                                fi
+                                dEfirst=$(awk 'BEGIN{printf ( "%.4f\n", '$E_currm' - '$E_first'  )}')
+                                dEprec=$(awk 'BEGIN{printf ( "%.4f\n", '$E_currm' - '$E_precm'  )}')
+                                perc_change=$(awk 'BEGIN{printf ( "%.2e\n", - ( '$E_currm' - '$E_precm' ) / '$E_precm'  * 100 )}')
+                                echo "$m:" $dEfirst $dEprec $perc_change | \
+                                                awk '{printf "%4s %14s %10s %11s\n", $1, $2, $3, $4}'
+                                E_precm=$E_currm
+                        done
+                        printf "\n"
                 	exit	
 		elif [ $CurrStr == "--LastEnergy" ] || [ $CurrStr == "-EL" ]; then
                         Printf "print last computed energy\n\n"
