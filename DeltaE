@@ -8,6 +8,7 @@ GibbsCorr=0
 Enthalpy=0
 FoundFiles=0
 Hartree=0
+eV=0
 Stoic=0
 Stoicnum=0
 Prec=6
@@ -73,36 +74,47 @@ for i in $String; do
 		MuteMode=1
 		SuperMuteMode=1
         elif [ $i == "-z" ] || [ $i == "--zpe" ]; then
-                ZPE=1
-		if [ $arg ]; then
-			echo "Warning: overriding $arg with $i. Please use only one argument!"
+		if [ $NoOverride -eq 1 ]; then
+			echo "Error: clashing arguments"
+			exit
 		fi
-		arg=$i
+		args+=($i)
+		NoOverride=1
 	elif [ $i == "-G" ] || [ $i == "-g" ] || [ $i == "--gibbs" ]; then
-		Gibbs=1
-		if [ $arg ]; then
-                        echo "Warning: overriding $arg with $i. Please use only one argument!"
+		if [ $NoOverride -eq 1 ]; then
+                        echo "Error: clashing arguments"
+                        exit
                 fi
-		arg=$i
+                args+=($i)
+                NoOverride=1
 	elif [ $i == "-c" ] || [ $i == "--gcorr" ]; then
-		GibbsCorr=1
-		if [ $arg ]; then
-                        echo "Warning: overriding $arg with $i. Please use only one argument!"
+		if [ $NoOverride -eq 1 ]; then
+                        echo "Error: clashing arguments"
+                        exit
                 fi
-		arg=$i
+                args+=($i)
+                NoOverride=1
 	elif [ $i == "-H" ] || [ $i == "--enthalphy" ]; then
-                Enthalpy=1
-		if [ $arg ]; then
-                        echo "Warning: overriding $arg with $i. Please use only one argument!"
+		if [ $NoOverride -eq 1 ]; then
+                        echo "Error: clashing arguments"
+                        exit
                 fi
-		arg=$i
+                args+=($i)
+                NoOverride=1
 	elif [ $i == "-a" ] || [ $i == "--hartree" ]; then
-		Hartree=1
+		args+=($i)
 		Prec=9
+	elif [ $i == "--eV" ]; then
+		args+=($i)
 	elif [ $i == "-s" ] || [ $i == "--stoic" ]; then
                 Stoic=1
 	elif [ $i == "-q" ] || [ $i == "--quasiharmonic" ]; then
-		QH=1
+		 if [ $NoOverride -eq 1 ]; then
+                        echo "Error: clashing arguments"
+                        exit
+                fi
+                args+=($i)
+                NoOverride=1
 	elif [ $(echo $i | grep "^[0-9]*") ] && [ $Stoic -eq 1 ]; then
 		StoicValues+=("$i")
 	elif [ $(echo $i | grep ".out\|.log") ] || [ $(echo $i | grep "OUTCAR") ]; then
@@ -112,11 +124,11 @@ for i in $String; do
 		fi
 		Files+=("$i")
 	elif [ $i == "-T" ]; then
-	       CustTemp=1
+                args+=($i)
         elif [ $CustTemp -eq 1 ] && [[ $i =~ $re ]]; then
-               Temp=$i	       
+         	args+=($i)         
         elif [ $i == "-A" ] || [ $i == "--per-atom" ]; then
-		extraarg="-A"
+		args+=($i)
 	else
 		echo "Can't understand $i"
 		exit
@@ -146,27 +158,7 @@ fi
 
 for k in ${Files[@]}; do
 	CheckEnding $k
-	if [ $QH -eq 1 ]; then
-		if [ $Hartree -eq 0 ]; then
-			if [ $CustTemp -eq 0 ]; then 
-				Energies+=("$(LastEnergy $extraarg $arg $k -q)")
-			else
-				Energies+=("$(LastEnergy $extraarg $arg $k -q -T $Temp)")
-			fi
-		else
-			if [ $CustTemp -eq 0 ]; then
-				Energies+=("$(LastEnergy $extraarg $arg $k -q --hartree)")
-			else
-				Energies+=("$(LastEnergy $extraarg $arg $k -q --hartree -T $Temp)")
-			fi
-		fi
-	else
-		if [ $Hartree -eq 0 ]; then
-                        Energies+=("$(LastEnergy $extraarg $arg $k)")
-                else
-                        Energies+=("$(LastEnergy $extraarg $arg $k --hartree)")
-                fi
-	fi
+	Energies+=("$(LastEnergy $k ${args[@]})")
 done
 
 
@@ -179,7 +171,7 @@ if [ $Stoic -eq 0 ]; then
 else
 	TmpEnergy=0
 	for n in $(seq 0 $((${#Energies[@]}-1))); do
-		TmpEnergy=$(Fammi "$TmpEnergy + ${StoicValues[$n]} * ${Energies[$n]}")
+		TmpEnergy=$(Fammi -f $Prec "$TmpEnergy + ${StoicValues[$n]} * ${Energies[$n]}")
 	done
 	echo $TmpEnergy
 fi
