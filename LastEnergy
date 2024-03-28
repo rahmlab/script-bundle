@@ -165,7 +165,7 @@ elif [ $ORCACalc -eq 1 ]; then
         elif [ $ZPE -eq 1 ]; then
                 RawHartreeEnergy=$(grep "FINAL SINGLE POINT ENERGY" $filename | awk 'END{print $5}')
                 ZPECorrection=$(grep "Non-thermal (ZPE) correction" $filename | awk '{print $4}')
-                HartreeEnergy=$(Fammi "$ZPECorrection + $RawHartreeEnergy")
+                HartreeEnergy=$(awk 'BEGIN{printf ( "%.6f\n", '$ZPECorrection' + '$RawHartreeEnergy' )}')
         elif [ $GibbsCorr -eq 1 ]; then
                 HartreeEnergy=$(awk '/G-E\(el)/{print $3}' $filename)
         else
