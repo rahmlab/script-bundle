@@ -49,7 +49,7 @@ PrintHelp(){
 	printf "\t-t [time] - time limit (formats: Dd, HHh, MMm, HH:MM:SS or D-HH:MM:SS. Default = 12h, Max is 7d) Examples: -t 30m; -t 02h; -t 1d\n"
 	printf "\t-n [1-32] - number of cores (default = 32, Max on Vera = 32)    \n"
 	printf "\t-N [1-2]  - number of nodes (default = 1)    \n"
-	printf "\t-M [1-1024]  - total allocated memory in GB (default = 64) \n" 
+	printf "\t-M [0-1024]  - total allocated memory in GB (default = 64). 0 means no memory limit is specified. \n" 
 	printf "\t-p [partition] - vera or lux (default = vera) \n"
 	printf "\t-J [job name] - sbatch job name (default = input file name, without extension. For vasp: vasp_[current folder])\n"
 	printf "\t[any other key(s)] - additional argument (only for bash, python and crest). Can be put in quotes. Example: SUBMIT this.sh \"arg1 arg2 arg3\" \n"
@@ -167,8 +167,8 @@ for i in $(seq 1 $NF); do
 			SkipNext=1
 			;;	
 		-M)	ReqMem=1
-                        if [ $FollowingStr -gt 1024 ] || [ $FollowingStr -lt 1 ]; then
-				echo "-M limit exceeded: it must be 1 to 196 GB (only int GB)"
+                        if [ $FollowingStr -gt 1024 ] || [ $FollowingStr -lt 0 ]; then
+				echo "-M limit exceeded: it must be 0 to 196 GB (only int GB)"
                                 exit
                         else
                                 Memory=$FollowingStr
@@ -598,6 +598,13 @@ MemoryPerCPU=$(echo $" ($Memory * 1024) / $Cores" | bc) 		#For some reason it ne
 
 if [ $Cores -lt $MaxCores ]; then
 	Memory=$(echo $" ($Memory * $Cores) / $MaxCores" | bc) 
+fi
+
+if [ $Memory -gt 0 ]; then
+        Memory=$(echo $" $Memory + 3 " | bc)
+else
+        sed -i 's/#SBATCH --mem/##SBATCH --mem/' submitter.tmp
+        Memory=None
 fi
 
 Memory=$(echo $" $Memory + 3 " | bc)
