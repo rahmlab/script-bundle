@@ -64,6 +64,13 @@ elif [ $arg == "-i" ]; then
 	ARGS=("$@")
 	for i in $(seq 3 $((2+Files))); do
 		Filename=${ARGS[$i]}
-		sed -i 's@'$String'@'$Replace'@g' $Filename
+		if [ -z "$(echo "$String" | grep " ")" ] && [ -z "$(echo "$Replace" | grep " ")" ]; then
+                        sed -i 's@'$String'@'$Replace'@g' $Filename
+                else
+                        sed -i "s~$String~$Replace~g" $Filename
+                        if [ "$(grep "$String" $Filename)" ] || [ -z "$(grep "$Replace" $Filename)" ]; then
+                                echo "Error: didn't work with $Filename"
+                        fi
+                fi
 	done
 fi
