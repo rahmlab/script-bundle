@@ -164,14 +164,14 @@ done
 
 if [ $Stoic -eq 0 ]; then
 	if [ ${#Files[@]} -eq 1 ]; then
-		Fammi -f $Prec "${Energies[0]}"
+		awk 'BEGIN{printf ( "%.'$Prec'f\n", '${Energies[0]}' )}'
 	else
-		Fammi -f $Prec "${Energies[0]} - ${Energies[1]}"
+		awk 'BEGIN{printf ( "%.'$Prec'f\n", '${Energies[0]}' - '${Energies[1]}' )}'
 	fi
 else
 	TmpEnergy=0
 	for n in $(seq 0 $((${#Energies[@]}-1))); do
-		TmpEnergy=$(Fammi -f $Prec "$TmpEnergy + ${StoicValues[$n]} * ${Energies[$n]}")
+		TmpEnergy=$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$TmpEnergy' + '${StoicValues[$n]}' * '${Energies[$n]}' )}')
 	done
 	echo $TmpEnergy
 fi
