@@ -9,10 +9,18 @@ elif (( $(echo "$CompTimes < 3600" | bc -l) )); then
 	CompTimem=$(echo "$CompTimes / 60" | bc)
 	CompTimes=$(echo "$CompTimes % 60" | bc)
 	printf ">>>>>>>>>>>> Calculation ended at $(date): $CompTimem minutes and $CompTimes seconds\n"
-else 
+elif (( $(echo "$CompTimes < 86400" | bc -l) )); then
 	CompTimeh=$(echo "$CompTimes / 3600" | bc)
 	CompTimes=$(echo "$CompTimes % 3600" | bc)
 	CompTimem=$(echo "$CompTimes / 60" | bc)
         CompTimes=$(echo "$CompTimes % 60" | bc)
         printf ">>>>>>>>>>>> Calculation ended at $(date): $CompTimeh hours, $CompTimem minutes and $CompTimes seconds\n"
+else
+        CompTimed=$(echo "$CompTimes / 86400" | bc)
+        CompTimes=$(echo "$CompTimes % 86400" | bc)
+        CompTimeh=$(echo "$CompTimes / 3600" | bc)
+        CompTimes=$(echo "$CompTimes % 3600" | bc)
+        CompTimem=$(echo "$CompTimes / 60" | bc)
+        CompTimes=$(echo "$CompTimes % 60" | bc)
+        printf ">>>>>>>>>>>> Calculation ended at $(date): $CompTimed days, $CompTimeh hours, $CompTimem minutes and $CompTimes seconds\n"
 fi
