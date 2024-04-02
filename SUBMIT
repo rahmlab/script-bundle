@@ -246,6 +246,12 @@ CheckInputFile() {
 		if [ ! -e "INCAR" ]; then
              		printf "\nError: INCAR not found\n\n"
              		exit
+		elif [ ! -e "POTCAR" ]; then
+                        printf "\nError: POTCAR not found\n\n"
+                        exit
+                elif [ ! -e "POSCAR" ]; then
+                        printf "\nError: POSCAR not found\n\n"
+                        exit
          	fi
             	folder=$(echo $PWD | rev | cut -d '/' -f 1 | rev)
 		if [ $ReqJobName -eq 0 ]; then
