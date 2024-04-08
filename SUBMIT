@@ -369,9 +369,9 @@ CheckRuns(){
 		OldJobStatus=$(sacct -X -n -b | grep "$OldJobId" | awk '{print $2}')
 		printf "\n"
 		if [ "$(echo $OldJobStatus | grep "RUNNING")" ]; then
-			echo "WARNING: at least one running job has the same job name!"
+			echo "WARNING: at least one running job has the same job name ($JobName)!"
 		elif [ "$(echo $OldJobStatus | grep "PENDING")" ]; then
-			echo "WARNING: at least one pending job has the same job name!"
+			echo "WARNING: at least one pending job has the same job name ($JobName)!"
 		fi
 		echo "Do you want to launch it anyways? (y/any key)"
 		read Ans
@@ -656,6 +656,6 @@ sbatch submitter.tmp
 rm submitter.tmp
 
 
-#echo ""
-#ssq -n
+echo ""
+
 
