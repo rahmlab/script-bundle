@@ -83,14 +83,14 @@ CheckCompleted (){
 
 
 NRunningJobs=$(squeue --me -h | awk 'END{print NR}')
+maxPchar=$(awk 'BEGIN{a=0}{if (length($2)>0+a) a=length($2)} END{print a+3}' $RJF)
 
 if [ $1 ] && [ $1 == "-r" ]; then
 	if [ $NRunningJobs -eq 0 ]; then
 		printf "No running jobs at $(date '+%Y-%m-%dT%H:%M:%S')\n\n"
 	else
-		maxNchar=$(awk 'BEGIN{a=0}{if (length($2)>0+a) a=length($2)} END{print a+3}' $RJF)
                 printf "Running jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
-                awk '{printf "%-8s %-'$maxNchar's %-1s\n", $1,$2,$4}' $RJF
+                awk '{printf "%-8s %-'$maxPchar's %-1s\n", $1,$2,$4}' $RJF
 		echo ""
 		exit
 	fi
@@ -107,12 +107,12 @@ fi
 
 col=$(stty size | cut -d" " -f2)
 
-if [ $col -ge 123 ]; then
-	Nspaces=123
-elif [ $col -ge 90 ]; then
-	Nspaces=90
-elif [ $col -ge 81 ]; then
-	Nspaces=81
+if [ $col -ge $(echo $"$maxPchar + 73" | bc) ]; then
+        Nspaces=$(echo $"$maxPchar + 73" | bc)
+elif [ $col -ge $(echo $"$maxPchar + 40" | bc) ]; then
+        Nspaces=$(echo $"$maxPchar + 40" | bc)
+elif [ $col -ge $(echo $"$maxPchar + 31" | bc) ]; then
+        Nspaces=$(echo $"$maxPchar + 31" | bc)
 else
 	Nspaces=64
 fi
@@ -131,12 +131,12 @@ done
 printf "\n"
 
 
-if [ $col -ge 123 ]; then
-        squeue --me -o "%.8A %.50j %.5P %.5T %.16S %.10M %.10l %.4C %.7m"
-elif [ $col -ge 90 ]; then
-        squeue --me -o "%.8A %.25j %.5P %.5T %.16S %.10M %.10l %.4C"
-elif [ $col -ge 81 ]; then
-	squeue --me -o "%.8A %.22j %.5P %.4T %.16S %.10M %.10l"
+if [ $col -ge $(echo $"$maxPchar + 73" | bc) ]; then
+        squeue --me -o "%.8A %."$maxPchar"j %.5P %.5T %.16S %.10M %.10l %.4C %.7m"
+elif [ $col -ge $(echo $"$maxPchar + 40" | bc) ]; then
+        squeue --me -o "%.8A %."$maxPchar"j %.5P %.5T %.16S %.10M %.10l %.4C"
+elif [ $col -ge $(echo $"$maxPchar + 31" | bc) ]; then
+        squeue --me -o "%.8A %."$maxPchar"j %.5P %.4T %.16S %.10M %.10l"
 else
 	squeue --me -o "%.8A %.18j %.3P %.4T %.16S %.10M"
 fi
