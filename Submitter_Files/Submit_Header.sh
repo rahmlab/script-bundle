@@ -20,10 +20,10 @@ printf ">>>>>>>>>>>> Calculation start at $(date)\n\n"
 
 path=$(echo $SLURM_SUBMIT_DIR | cut -d '/' -f 6-20)
 
-if [ $(echo $path | grep -o "/" | wc -l) -gt 5 ]; then
-	firstdir=$(echo $path | cut -d '/' -f 1)
-	lastthreedir=$(echo $path | rev | cut -d '/' -f 1-5 | rev)
-	path="$firstdir"/.../"$lastthreedir"
+if [ ${#PWD} -gt 100 ]; then
+        firstdir=$(echo $path | cut -d '/' -f 1)
+        lastNdir=$(echo $path | rev | cut -d '/' -f 1-5 | rev)
+        path="$firstdir"/.../"$lastNdir"
 fi
 
 printf "$SLURM_JOB_ID\t$SLURM_JOB_NAME\t$(date +%F)\t$path\n" >> ~/bin/QueueHistory/RunningJobs.txt
