@@ -11,6 +11,9 @@ CheckCompleted (){
 	if [ $oldestdate ]; then
 		sacct -X -S $oldestdate -o JobID,State,End -n | awk '{print $1,$2,$3}' > $TMPID
 	fi
+	maxNchar=$(awk 'BEGIN{a=0}{if (length($2)>0+a) a=length($2)} END{print a+3}' $RJF)
+        maxNtabs=$(echo $"$maxNchar / 8" | bc)
+
 	for CurrJobID in $(awk '{print $1}' $RJF); do
 		i=$(awk '/'$CurrJobID'/{print NR}' $RJF)
 		CurrJobName=$(awk 'FNR=='$i'{print $2}' $RJF)
@@ -58,8 +61,8 @@ CheckCompleted (){
 		esac
 		printf "$CurrJobID\tat $EndTime\n\t$CurrJobName"
 		Nchar=${#CurrJobName}
-                NTabs=$(echo $"6 - ($Nchar/8)" | bc)
-                for tabs in $(seq 1 $NTabs); do printf "\t"; done
+                Ntabs=$(echo $"$maxNtabs - ( $Nchar / 8 ) +1 " | bc)
+                for tabs in $(seq 1 $Ntabs); do printf "\t"; done
 		printf "  $CurrJobPath\n"
 		fi
 	done
@@ -85,8 +88,9 @@ if [ $1 ] && [ $1 == "-r" ]; then
 	if [ $NRunningJobs -eq 0 ]; then
 		printf "No running jobs at $(date '+%Y-%m-%dT%H:%M:%S')\n\n"
 	else
-		printf "Running jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
-		awk '{printf "%-8s %-50s %-1s\n", $1,$2,$4}' $RJF
+		maxNchar=$(awk 'BEGIN{a=0}{if (length($2)>0+a) a=length($2)} END{print a+3}' $RJF)
+                printf "Running jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
+                awk '{printf "%-8s %-'$maxNchar's %-1s\n", $1,$2,$4}' $RJF
 		echo ""
 		exit
 	fi
