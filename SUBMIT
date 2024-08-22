@@ -2,7 +2,7 @@
 #---------- SUBMIT -------------------------------------------------------
 #Script to submit jobs to slurm
 #Author: Marco Cappelletti github.com/cappecaps
-#Last update: 20 March 2024
+#Last update: 22 Aug 2024
 
 
 #---------- Get some variables -------------------------------------------
@@ -28,6 +28,9 @@ ReqJobName=0
 debug=0
 SkipNext=0
 InputDetected=0
+ImplicitYes=0
+PJF=~/bin/QueueHistory/PendingJobs.txt
+RJF=~/bin/QueueHistory/RunningJobs.txt
 
 # ---------- Functions ---------------------------------------------------
 
@@ -56,6 +59,8 @@ PrintHelp(){
 	printf "\t--arg [argument] - same as above, when [argument] is conflicting with SUBMIT script (e.g. -n or -t). Again, \"[argument(s)]\" can be put in quotes.\n"
 	printf "\t--chk - (only for gaussian) put \%chk=[filename].chk on top of the input file. Overrides it if already present.\n"
 	printf "\t--debug - prints a submitter.sh file and does NOT launch the calculation. It can be launched with \"sbatch submitter.sh\"\n"
+	printf "\t-y/--yes - implicitly say yes to questions. Use it at your own risk\n"
+
 	printf "\nPre-sets:  \n"
 	printf "\ttest\t- 8 cores, 16GB, 10 minutes\n"	
 	printf "\tshort\t- 16 cores, 32GB, 1 hour\n"
@@ -89,6 +94,7 @@ for i in $(seq 1 $NF); do
 	
 	case $CurrStr in
 		g16 | orca | cp2k | ade | python | bash | crest | vasp | ase)
+			printf "\nRequested program: $CurrStr\n"
 			ProgramToRun=$CurrStr
 			;;
 
@@ -115,21 +121,21 @@ for i in $(seq 1 $NF); do
 		-t)	
 			if [ $(echo $FollowingStr | grep "^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]$") ] || [ $(echo $FollowingStr | grep "^[0-9]:[0-5][0-9]:[0-5][0-9]$") ] || [ $(echo $FollowingStr | grep "^[0-7]-[0-2][0-9]:[0-5][0-9]:[0-5][0-9]$") ]; then
                         	Time=$FollowingStr
-			elif [ $(echo $FollowingStr | grep "m") ]; then
+			elif [ $(echo $FollowingStr | grep "m$") ]; then
 				Nmins=$(echo $FollowingStr | cut -d 'm' -f 1)
 				if [ -z $(echo $Nmins | grep "^[0-5][0-9]$") ]; then
 					echo "Error: Use format 01-59 for minutes"
 					exit
 				fi
 				Time="00:"$Nmins":00"
-			elif	[ $(echo $FollowingStr | grep "h") ]; then
+			elif	[ $(echo $FollowingStr | grep "h$") ]; then
 				Nhours=$(echo $FollowingStr | cut -d 'h' -f 1)
                                 if [ -z $(echo $Nhours | grep "^[0-2][0-9]$") ] || [ $Nhours -gt 24 ]; then
                                         echo "Error: Use format 01-24 for hours"
                                         exit
                                 fi
                                 Time=""$Nhours":00:00"
-			elif	[ $(echo $FollowingStr | grep "d") ]; then
+			elif	[ $(echo $FollowingStr | grep "d$") ]; then
 				Ndays=$(echo $FollowingStr | cut -d 'd' -f 1)
                                 if [ -z $(echo $Ndays | grep "^[1-7]$") ]; then
                                         echo "Error: Use format 1-7 for days"
@@ -193,6 +199,7 @@ for i in $(seq 1 $NF); do
 		-J)	ReqJobName=1
 			JobName=$FollowingStr
 			SkipNext=1;;
+		-y|--yes) ImplicitYes=1;;
 		test)
 			Time=00:10:00
 			Cores=8
@@ -201,7 +208,7 @@ for i in $(seq 1 $NF); do
 			ReqMem=1
 			;;
 		short)
-			Time=01:00:00	
+			Time=01:00:00
 			Cores=16
                         ReqCores=1
                         Memory=32
@@ -249,7 +256,7 @@ CheckInputFile() {
 		elif [ ! -e "POTCAR" ]; then
                         printf "\nError: POTCAR not found\n\n"
                         exit
-                elif [ ! -e "POSCAR" ]; then
+		elif [ ! -e "POSCAR" ]; then
                         printf "\nError: POSCAR not found\n\n"
                         exit
          	fi
@@ -365,42 +372,47 @@ GetProgramToRun(){		#If no program is specified, guess it based on both the inpu
 
 CheckRuns(){
 	if [ "$(squeue --me -h -n $JobName)" ]; then
-		OldJobId=$(squeue --me -h -n $JobName | awk '{print $1}')
-		OldJobStatus=$(sacct -X -n -b | grep "$OldJobId" | awk '{print $2}')
-		printf "\n"
-		if [ "$(echo $OldJobStatus | grep "RUNNING")" ]; then
-			echo "WARNING: at least one running job has the same job name ($JobName)!"
-		elif [ "$(echo $OldJobStatus | grep "PENDING")" ]; then
-			echo "WARNING: at least one pending job has the same job name ($JobName)!"
-		fi
-		echo "Do you want to launch it anyways? (y/any key)"
-		read Ans
-		if [ $Ans != "y" ] && [ $Ans != "Y" ] && [ $Ans != "yes" ] && [ $Ans != "YES" ]; then
-			echo "Program stopped by User"
+		CurrPath=$(echo $PWD | cut -d '/' -f 6-30 ) 	#as in Submitter_header.sh
+		if [ "$(awk '/'$JobName'/{print $4}' $RJF | grep "$CurrPath")" ]; then
+			echo "Error: This job is already running!"
+			echo "check your squeue and running jobs file"
+			echo ""
 			exit
-		fi
-	elif [ $OutputFile == "none" ]; then
-		printf "WARNING: I cannot check if the output will be overrided. Continue? (y/any key)\n> "
-		read Ans
-                if [ $Ans != "y" ] && [ $Ans != "Y" ] && [ $Ans != "yes" ] && [ $Ans != "YES" ]; then
-                        echo "Program stopped by User"
+		elif [ "$(awk '/'$JobName'/{print $4}' $PJF | grep "$CurrPath")" ]; then
+			echo "Error: This job is already pending!"
+                        echo "check your squeue and pending jobs file"
+			echo ""
                         exit
-                fi
-	elif [ -e $OutputFile ]; then
+		fi
+		printf "\n"
+	elif [ $OutputFile == "none" ]; then
+		printf "WARNING: I cannot check if the output will be overrided."
+		if [ $ImplicitYes -eq 0 ]; then
+			printf " Continue? (y/any key)\n> "
+			read Ans
+                	if [ $Ans != "y" ] && [ $Ans != "Y" ] && [ $Ans != "yes" ] && [ $Ans != "YES" ]; then
+                	        echo "Program stopped by User"
+                	        exit
+                	fi
+		else
+			printf "\nAnswered yes implicitly. I'll proceede"
+		fi
+	fi
+	if [ -e $OutputFile ]; then
 		printf "\n"
 		echo "WARNING: this job has already been run. The output ("$OutputFile") will be overrided."
-		printf 	"What to you want to do?\n 0: stop\n 1: backup output file and continue\n 2: continue and override\n> "
+		printf "What to you want to do?\n 0: stop\n 1: backup output file and continue\n 2: continue and override\n> "
                 read Ans
 		echo ""
 		case $Ans in
 			0) 	echo "Program stopped by the user"
 				exit;;
-			1)	bkpidx=0
-				while [ -e $OutputFileName_$bkpidx.$ProgramOutputExt ]; do
+			1)	bkpidx=1
+				while [ -e $OutputFile.backup_$bkpidx ]; do
 					((bkpidx++))
 				done
-				mv $OutputFile "$OutputFileName"_$bkpidx.$ProgramOutputExt
-				echo "$OutputFile moved to $OutputFileName_$bkpidx.$ProgramOutputExt";;
+				mv $OutputFile "$OutputFile".backup_$bkpidx
+				echo "$OutputFile moved to $OutputFile.backup_$bkpidx";;
 			2)	echo "$OutputFile will be overrided";;
 			*)	echo "Program stopped"
 				exit;;
@@ -556,6 +568,22 @@ fi
 }
 
 
+GetPath(){
+	path=$(echo $PWD | cut -d '/' -f 6-30)
+
+	if [ ${#PWD} -gt 110 ]; then
+        	Ndir=$(echo $path | awk -F '/' '{print NF}')
+        	firstdir=$(echo $path | cut -d '/' -f 1)
+        	if [ $Ndir -ge 6 ]; then
+                	lastNdir=$(echo $path | rev | cut -d '/' -f 1-$((Ndir-3)) | rev)
+                	path="$firstdir"/.../"$lastNdir"
+        	elif [ $Ndir -ge 3 ]; then
+                	lastNdir=$(echo $path | rev | cut -d '/' -f 1-$((Ndir-2)) | rev)
+                	path="$firstdir"/.../"$lastNdir"
+        	fi
+	fi
+
+}
 
 
 # -------- PROGRAM START -----------------------------------------------------------------------------------
@@ -579,7 +607,7 @@ CheckRuns
 CheckCluster
 
 if [ $ProgramToRun == "g16" ] || [ $ProgramToRun == "ade" ] || [ $ProgramToRun == "orca" ]; then
-	ParametersToInputFile #add or change e.g. %nprocshared and %mem in the input file
+	ParametersToInputFile #add or change %nprocshared and %mem in the input file
 fi
 
 
@@ -607,13 +635,11 @@ if [ $Cores -lt $MaxCores ]; then
 fi
 
 if [ $Memory -gt 0 ]; then
-        Memory=$(echo $" $Memory + 3 " | bc)
+	Memory=$(echo $" $Memory + 6 " | bc)
 else
-        sed -i 's/#SBATCH --mem/##SBATCH --mem/' submitter.tmp
-        Memory=None
+	sed -i 's/#SBATCH --mem/##SBATCH --mem/' submitter.tmp
+	Memory=None
 fi
-
-Memory=$(echo $" $Memory + 3 " | bc)
 
 sed -i 's/JBTIME/'$Time'/' submitter.tmp		#Replace specified (or default) settings
 sed -i 's/JBCORES/'$Cores'/' submitter.tmp
@@ -641,7 +667,7 @@ printf "\nLaunching \"$JobName\" on $Cluster...
 	Time:\t\t$(date)
 	Time limit:\t$Time\n\n"
 
-cat $binpath/ending.sh >> submitter.tmp
+cat $binpath/ending.txt >> submitter.tmp
 
 if [ $Nodes -ge 2 ]; then
 	sed -i 's/##SBATCH --gres=ptmpdir:1/#SBATCH --gres=ptmpdir:1/' submitter.tmp
@@ -651,11 +677,13 @@ if [ $debug -eq 1 ]; then
 	exit
 fi
 
+GetPath
+
+printf "$JobName\t$path\n" >> $PJF
+
 sbatch submitter.tmp
 
 rm submitter.tmp
 
 
 echo ""
-
-
