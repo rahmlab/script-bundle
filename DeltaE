@@ -2,6 +2,7 @@
 
 MuteMode=0
 SuperMuteMode=0
+NoOverride=0
 ZPE=0
 Gibbs=0
 GibbsCorr=0
@@ -9,13 +10,18 @@ Enthalpy=0
 FoundFiles=0
 Hartree=0
 eV=0
+kJmol=0
 Stoic=0
 Stoicnum=0
 Prec=6
 QH=0
 extraarg=""
-CustTemp=0
 Temp=0
+PrintUnit=0
+Unit=kcal/mol
+re='^[0-9]+([.][0-9]+)?$'
+ReadNum=0
+
 
 CheckEnding(){
 if [ "$(head $1 | grep "Gaussian, Inc.")" ]; then
@@ -48,16 +54,21 @@ if [ -z $1 ] || [ $1 == "-h" ]; then
         printf " [none]\t\t\t- DeltaE of last electronic energies (E) in kcal/mol. Only for number of output files N = 2\n"
         printf " -m/--mute\t\t- Mute mode: do not print errors, but symbols in case something goes wrong\n"
         printf " -M/--supermute\t\t- do not print errors NOR symbols in case something goes wrong (use it with caution!)\n\n"
-        printf " -a/--hartree\t\t- print delta energy in Hartree\n"
-        printf " --eV\t\t\t- print delta energy in eV\n\n"
+	printf " -f/--prec\t\t- floating point precision\n\n"
+        printf " -a/--hartree\t\t- print energy in Hartree\n"
+        printf " -e/--eV\t\t\t- print energy in eV\n"
+	printf " -J/--kJmol\t\t- print energy in kJ/mol\n"
         printf " -z/--zpe\t\t- use E + ZPE\n"
         printf " -H/--enthalpy\t\t- use enthalpy (E + H)\n"
         printf " -G/--gibbs\t\t- use Gibbs free energy (E + G_corr). Print an error if not available\n"
         printf " -c/--gcorr\t\t- use thermal correction to Gibbs free energy (G_corr)\n"
         printf " -q/--quasiharmonic\t- use quasi-harmonic Gibbs free energy. It needs goodvibes python package\n"
-        printf " \t-T [integer]\t- (after -q) specifies temperature\n\n"
+	printf " -C/--conc [float/int]\t- concentration correction in Molar. Default is 298.15K = 1.894... \n"
+        printf " -T [integer]\t\t- (after -q) specifies temperature\n"
         printf " -s/--stoic [integers]\t- define stoichiometry. The number of intergers must be equivalent to N\n"
-	printf " -A/--per-atom\t\t- calculate differences of atomic energies\n\n"
+	printf " -A/--per-atom\t\t- calculate differences of atomic energies\n"
+	printf " -d/--div [integer]\t- divide the result by that number\n"
+	printf " -u/--print-unit\t- print unit after value\n"
 
         printf "\n"
 	exit
@@ -68,7 +79,16 @@ String=$(echo $*)
 
 
 for i in $String; do
-	if [ $i == "-m" ]; then
+	if [ $ReadNum -eq 1 ]; then
+		if ! [[ $i =~ $re ]]; then
+			echo "Error: expected number after $option"
+			exit
+		else
+			args+=($i)
+			ReadNum=0
+		fi
+
+	elif [ $i == "-m" ]; then
                 MuteMode=1
 	elif [ $i == "-M" ]; then
 		MuteMode=1
@@ -102,10 +122,19 @@ for i in $String; do
                 args+=($i)
                 NoOverride=1
 	elif [ $i == "-a" ] || [ $i == "--hartree" ]; then
+		Unit=Hartree
 		args+=($i)
 		Prec=9
-	elif [ $i == "--eV" ]; then
+	elif [ $i == "-e" ] || [ $i == "--eV" ]; then
+		Unit=eV
 		args+=($i)
+	elif [ $i == "-f" ] || [ $i == "--prec" ]; then
+                args+=($i)
+		option=$i
+		ReadNum=1
+	elif [ $i == "-J" ] || [ $i == "--kJmol" ]; then
+		Unit=kJ/mol
+                args+=($i)
 	elif [ $i == "-s" ] || [ $i == "--stoic" ]; then
                 Stoic=1
 	elif [ $i == "-q" ] || [ $i == "--quasiharmonic" ]; then
@@ -125,16 +154,31 @@ for i in $String; do
 		Files+=("$i")
 	elif [ $i == "-T" ]; then
                 args+=($i)
-        elif [ $CustTemp -eq 1 ] && [[ $i =~ $re ]]; then
-         	args+=($i)         
+		option=$i
+		ReadNum=1
         elif [ $i == "-A" ] || [ $i == "--per-atom" ]; then
 		args+=($i)
+	elif [ $i == "-d" ] || [ $i == "--div" ]; then
+                args+=($i)
+		option=$i
+		ReadNum=1
+	elif [ $i == "-u" ] || [ $i == "--print-unit" ]; then
+                PrintUnit=1
 	else
 		echo "Can't understand $i"
 		exit
         fi
+
+	if [ $Stoic -eq 1 ] && ! [ $(echo $i | grep "^[0-9]*") ]; then
+		Stoic=0
+	fi
 	
 done
+
+if [ $ReadNum -eq 1 ]; then
+	echo "Error: expected number after $option"
+	exit
+fi
 
 if [ ${#Files[@]} -eq 0 ]; then
 	echo "Error: I need at least one file"
@@ -164,20 +208,21 @@ done
 
 if [ $Stoic -eq 0 ]; then
 	if [ ${#Files[@]} -eq 1 ]; then
-		awk 'BEGIN{printf ( "%.'$Prec'f\n", '${Energies[0]}' )}'
+		printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '${Energies[0]}' )}')"
 	else
-		awk 'BEGIN{printf ( "%.'$Prec'f\n", '${Energies[0]}' - '${Energies[1]}' )}'
+		printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '${Energies[0]}' - '${Energies[1]}' )}')"
 	fi
 else
 	TmpEnergy=0
 	for n in $(seq 0 $((${#Energies[@]}-1))); do
 		TmpEnergy=$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$TmpEnergy' + '${StoicValues[$n]}' * '${Energies[$n]}' )}')
 	done
-	echo $TmpEnergy
+	printf -- "$TmpEnergy"
 fi
 
 
-
-
-
-
+if [ $PrintUnit -eq 1 ]; then
+	echo " $Unit"
+else
+	echo ""
+fi
