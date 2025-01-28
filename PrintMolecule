@@ -4,7 +4,9 @@ Xlim=20
 scale=10
 plane=xy
 flip=0
-Rotate=0
+RotateX=0
+RotateY=0
+RotateZ=0
 NoLabels=0
 Colors=0
 NoH=0
@@ -21,9 +23,7 @@ Yellow='\033[0;33m'       # Yellow
 Blue='\033[0;34m'         # Blue
 Purple='\033[0;35m'       # Purple
 Cyan='\033[0;36m'         # Cyan
-White='\033[0;37m'        # White
-Grey='\033[2;30m'        # Grey
-
+LightGrey='\033[0;37m'        # LightGrey
 
 # Bold
 BBlack='\033[1;30m'       # Black
@@ -34,6 +34,16 @@ BBlue='\033[1;34m'        # Blue
 BPurple='\033[1;35m'      # Purple
 BCyan='\033[1;36m'        # Cyan
 BWhite='\033[1;37m'       # White
+
+# High Intensity
+IBlack='\033[0;90m'       # Black
+IRed='\033[0;91m'         # Red
+IGreen='\033[0;92m'       # Green
+IYellow='\033[0;93m'      # Yellow
+IBlue='\033[0;94m'        # Blue
+IPurple='\033[0;95m'      # Purple
+ICyan='\033[0;96m'        # Cyan
+IWhite='\033[0;97m'       # White
 
 # Bold High Intensity
 BIBlack='\033[1;90m'      # Black
@@ -73,14 +83,17 @@ PrintHelp (){
 	echo ""
 	echo "Usage: PrintMolecule [Filename] [-s scale (optional)] [-p plane (optional)] [-r rotation (optional)] [ -v (optional) ] [ -H (optional) ] [ -L (optional) ]"
 	printf "\tFilename: either a gaussian output file or a xyz file\n"
-	printf "\tscale: an integer. Default = 10. Ideal range: 3-20\n"
-	printf "\tplane: projection plane: xy, yz or xz. Default: xy.\n"
-	printf "\trotation: angle rotation in degrees, anti-clockwise. Range: 0-180. Default: 0\n"
-	printf "\t-v: vertial mirror flip\n"
+	printf "\t-s [scale]: an integer. Default = 10. Ideal range: 3-20\n"
+	printf "\t-p [plane]: projection plane: xy, yz or xz. Default: xy.\n"
+	printf "\t-r / --rz [rotation]: angle rotation along off-screen (z-)axis in degrees, anti-clockwise. Range: -180-180. Default: 0.\n"
+	printf "\t--ry [rotation]: angle rotation along on-screen vertical (y-)axis in degrees, anti-clockwise. Range: -180-180. Default: 0.\n"
+	printf "\t--rx [rotation]: angle rotation along on-screen horizontal (x-)axis in degrees, anti-clockwise. Range: -180-180. Default: 0.\n"
+	printf "\t-v: vertical flip (rotate 180 degrees along on-screen y-axis). Vertical flip is always performed after rotation.\n"
 	printf "\t-H: remove hydrogens\n"
 	printf "\t-L: remove labels\n"
-	printf "\t-c: color some of the atoms\n"
+	printf "\t-c: color some of the atoms. Default is shades of grey based on off-screen depth. Depth-based color is incompatible with -c\n"
 	printf "\n"
+	printf "Info: rotations are always performed in this order: z, y, x.\n\n"
 	exit
 }
 
@@ -174,19 +187,46 @@ for i in $(seq 1 $#); do
 				echo "Error: planes can be xy, yz and xz"
 				exit
 			fi;;
-		-r)
-			rotation=$FollowingStr
-			Rotate=1
-			if [ -z $(echo $rotation | grep -e "^[0-9]" -e "^-[0-9]") ]; then
+		-r | --rz)
+			rotationZ=$FollowingStr
+			RotateZ=1
+			if [ -z $(echo $rotationZ | grep -e "^[0-9]" -e "^-[0-9]") ]; then
 				echo "Error: rotation angle must be an integer"
 				exit
-			elif [ $rotation -eq 0 ]; then
-				Rotate=0
+			elif [ $rotationZ -eq 0 ]; then
+				RotateZ=0
 			else
-				rad=$(awk 'BEGIN{printf "%.3f\n", 3.1416 * '$rotation' / 180 }')
-				cosA=$(awk 'BEGIN{printf "%.3f\n", cos('$rad')}')
-				sinA=$(awk 'BEGIN{printf "%.3f\n", sin('$rad')}')
+				radZ=$(awk 'BEGIN{printf "%.3f\n", 3.1416 * '$rotationZ' / 180 }')
+				cosAZ=$(awk 'BEGIN{printf "%.3f\n", cos('$radZ')}')
+				sinAZ=$(awk 'BEGIN{printf "%.3f\n", sin('$radZ')}')
 			fi;;
+		--ry)
+                        rotationY=$FollowingStr
+                        RotateY=1
+                        if [ -z $(echo $rotationY | grep -e "^[0-9]" -e "^-[0-9]") ]; then
+                                echo "Error: rotation angle must be an integer"
+                                exit
+                        elif [ $rotationY -eq 0 ]; then
+                                RotateY=0
+                        else
+                                radY=$(awk 'BEGIN{printf "%.3f\n", 3.1416 * '$rotationY' / 180 }')
+                                cosAY=$(awk 'BEGIN{printf "%.3f\n", cos('$radY')}')
+                                sinAY=$(awk 'BEGIN{printf "%.3f\n", sin('$radY')}')
+                        fi;;
+		--rx)
+                        rotationX=$FollowingStr
+                        RotateX=1
+                        if [ -z $(echo $rotationX | grep -e "^[0-9]" -e "^-[0-9]") ]; then
+                                echo "Error: rotation angle must be an integer"
+                                exit
+                        elif [ $rotationX -eq 0 ]; then
+                                RotateX=0
+                        else
+                                radX=$(awk 'BEGIN{printf "%.3f\n", 3.1416 * '$rotationX' / 180 }')
+                                cosAX=$(awk 'BEGIN{printf "%.3f\n", cos('$radX')}')
+                                sinAX=$(awk 'BEGIN{printf "%.3f\n", sin('$radX')}')
+                        fi;;
+
 		-v)	flip=1;;
 		-L)	NoLabels=1;;
 		-H)	NoH=1;;
@@ -224,63 +264,103 @@ esac
 
 
 if [ $plane == "xy" ]; then
-	awk '{print $3,$4}' xyzMatrix.tmp > XYvalues.tmp
+	awk '{print $3,$4,$5}' xyzMatrix.tmp > XYZvalues.tmp
 elif [ $plane == "xz" ]; then
-	awk '{print $3,$5}' xyzMatrix.tmp > XYvalues.tmp
+	awk '{print $3,$5,$4}' xyzMatrix.tmp > XYZvalues.tmp
 elif [ $plane == "yz" ]; then
-	awk '{print $4,$5}' xyzMatrix.tmp > XYvalues.tmp
+	awk '{print $4,$5,$3}' xyzMatrix.tmp > XYZvalues.tmp
 fi
 
+
+
+if [ $RotateZ -eq 1 ]; then
+	for num in $(seq 1 $NAtoms); do		#rotate along off-screen axis (Z)
+                X_old=$(awk 'FNR=='$num'{print $1}' XYZvalues.tmp)
+                Y_old=$(awk 'FNR=='$num'{print $2}' XYZvalues.tmp)
+		Z_old=$(awk 'FNR=='$num'{print $3}' XYZvalues.tmp)
+                X_new=$(awk 'BEGIN{printf "%.4f\n", '$X_old' * '$cosAZ' - '$Y_old' * '$sinAZ' }')
+                Y_new=$(awk 'BEGIN{printf "%.4f\n", '$X_old' * '$sinAZ' + '$Y_old' * '$cosAZ' }')
+                printf -- "$X_new\t$Y_new\t$Z_old\n" >> new_XYZvalues.tmp
+        done
+        mv new_XYZvalues.tmp XYZvalues.tmp
+fi
+
+
+if [ $RotateY -eq 1 ]; then
+        for num in $(seq 1 $NAtoms); do         #rotate along off-screen axis (Z)
+                X_old=$(awk 'FNR=='$num'{print $1}' XYZvalues.tmp)
+                Y_old=$(awk 'FNR=='$num'{print $2}' XYZvalues.tmp)
+                Z_old=$(awk 'FNR=='$num'{print $3}' XYZvalues.tmp)
+                X_new=$(awk 'BEGIN{printf "%.4f\n", '$X_old' * '$cosAY' - '$Z_old' * '$sinAY' }')
+                Z_new=$(awk 'BEGIN{printf "%.4f\n", '$X_old' * '$sinAY' + '$Z_old' * '$cosAY' }')
+                printf -- "$X_new\t$Y_old\t$Z_new\n" >> new_XYZvalues.tmp
+        done
+        mv new_XYZvalues.tmp XYZvalues.tmp
+fi
+
+
+if [ $RotateX -eq 1 ]; then
+        for num in $(seq 1 $NAtoms); do         #rotate along off-screen axis (Z)
+                X_old=$(awk 'FNR=='$num'{print $1}' XYZvalues.tmp)
+                Y_old=$(awk 'FNR=='$num'{print $2}' XYZvalues.tmp)
+                Z_old=$(awk 'FNR=='$num'{print $3}' XYZvalues.tmp)
+                Y_new=$(awk 'BEGIN{printf "%.4f\n", '$Y_old' * '$cosAX' - '$Z_old' * '$sinAX' }')
+                Z_new=$(awk 'BEGIN{printf "%.4f\n", '$Y_old' * '$sinAX' + '$Z_old' * '$cosAX' }')
+                printf -- "$X_old\t$Y_new\t$Z_new\n" >> new_XYZvalues.tmp
+        done
+        mv new_XYZvalues.tmp XYZvalues.tmp
+fi
 
 
 if [ $flip -eq 1 ]; then
-	sort -k1n XYvalues.tmp > sorted_XYvalues.tmp      #sort matrix based on X values (ascending)
+	sort -k1n XYZvalues.tmp > sorted_XYZvalues.tmp      #sort matrix based on X values (ascending)
 
-	minX=$(awk 'FNR==1{print $1}' sorted_XYvalues.tmp)
-	maxX=$(awk 'END{print $1}' sorted_XYvalues.tmp)
+	minX=$(awk 'FNR==1{print $1}' sorted_XYZvalues.tmp)
+	maxX=$(awk 'END{print $1}' sorted_XYZvalues.tmp)
 	midX=$(awk 'BEGIN{printf "%.6f\n", '$minX' + ( ( '$maxX' - '$minX' ) / 2 )}')
 
-	rm sorted_XYvalues.tmp
+	rm sorted_XYZvalues.tmp
 
-	for num in $(seq 1 $NAtoms); do
-		X_old=$(awk 'FNR=='$num'{print $1}' XYvalues.tmp)
+	for num in $(seq 1 $NAtoms); do		#rotate along on-screen y axis (Y)
+		X_old=$(awk 'FNR=='$num'{print $1}' XYZvalues.tmp)
                 X_new=$(awk 'BEGIN{printf "%.4f\n",  2*'$midX' - '$X_old' }')
-		Y_old=$(awk 'FNR=='$num'{print $2}' XYvalues.tmp)
-		printf -- "$X_new\t$Y_old\n" >> new_XYvalues.tmp
+		Y_old=$(awk 'FNR=='$num'{print $2}' XYZvalues.tmp)
+		Z_new=$(awk 'FNR=='$num'{print -$3}' XYZvalues.tmp)
+		printf -- "$X_new\t$Y_old\t$Z_new\n" >> new_XYZvalues.tmp
 	done
-	mv new_XYvalues.tmp XYvalues.tmp
+	mv new_XYZvalues.tmp XYZvalues.tmp
 fi
 
-if [ $Rotate -eq 1 ]; then
-	for num in $(seq 1 $NAtoms); do
-		X_old=$(awk 'FNR=='$num'{print $1}' XYvalues.tmp)
-		Y_old=$(awk 'FNR=='$num'{print $2}' XYvalues.tmp)
-		X_new=$(awk 'BEGIN{printf "%.4f\n", '$X_old' * '$cosA' - '$Y_old' * '$sinA' }')
-		Y_new=$(awk 'BEGIN{printf "%.4f\n", '$X_old' * '$sinA' + '$Y_old' * '$cosA' }')
-		printf -- "$X_new\t$Y_new\n" >> new_XYvalues.tmp
-	done
-	mv new_XYvalues.tmp XYvalues.tmp
-fi
 
 
 ScaleFact=$(awk 'BEGIN{printf "%.2f\n", '$scale' / 5 }')
 
 awk '{print $1$2}' xyzMatrix.tmp > symbols.tmp
-awk '{printf "%.0f\n", $1 * '$ScaleFact'}' XYvalues.tmp > Xvalues.tmp
-awk '{printf "%.0f\n", $2 * '$ScaleFact'}' XYvalues.tmp > Yvalues.tmp
+awk '{printf "%.0f\n", $1 * '$ScaleFact'}' XYZvalues.tmp > Xvalues.tmp
+awk '{printf "%.0f\n", $2 * '$ScaleFact'}' XYZvalues.tmp > Yvalues.tmp
 
-paste symbols.tmp Xvalues.tmp Yvalues.tmp > scaled_XYMatrix.tmp
+minZ=$(sort -k3n XYZvalues.tmp | awk '{printf "%.2f\n", $3}' | head -1)
+maxZ=$(sort -k3n XYZvalues.tmp | awk '{printf "%.2f\n", $3}' | tail -1)
 
-rm symbols.tmp Xvalues.tmp Yvalues.tmp XYvalues.tmp xyzMatrix.tmp
+depth=$(awk 'BEGIN{printf "%.2f\n", '$maxZ' - '$minZ' }')	#Z-axis depth
 
-sort -k3rn -k2n scaled_XYMatrix.tmp > sorted_XYMatrix.tmp      #sort matrix based on y values (descending) and the x values (ascending)
+if (( $(echo "$depth <= 0.1" |bc -l) )); then
+	awk '{printf "%.0f\n", 5}' XYZvalues.tmp > Zvalues.tmp
+else
+	awk '{printf "%.0f\n", 10 * (( $3 - '$minZ' ) / '$depth') }' XYZvalues.tmp > Zvalues.tmp
+fi
 
-minX=$(sort -k2n scaled_XYMatrix.tmp | awk '{print $2}' | head -1)
-maxX=$(sort -k2n scaled_XYMatrix.tmp | awk '{print $2}' | tail -1)
+paste symbols.tmp Xvalues.tmp Yvalues.tmp Zvalues.tmp > scaled_XYZMatrix.tmp
+
+rm symbols.tmp Xvalues.tmp Yvalues.tmp Zvalues.tmp XYZvalues.tmp xyzMatrix.tmp
+
+minX=$(sort -k2n scaled_XYZMatrix.tmp | awk '{print $2}' | head -1)
+maxX=$(sort -k2n scaled_XYZMatrix.tmp | awk '{print $2}' | tail -1)
 width=$(echo $" $(echo ${maxX#-}) + $(echo ${minX#-}) " | bc)
 
+sort -k3rn -k2n scaled_XYZMatrix.tmp > sorted_XYZMatrix.tmp      #sort matrix based on y values (descending) and the x values (ascending)
 
-rm scaled_XYMatrix.tmp
+rm scaled_XYZMatrix.tmp
 
 col=$(stty size | cut -d" " -f2)
 col=$((col/3))
@@ -292,24 +372,37 @@ if [ $width -ge $col ]; then
 	exit
 fi
 
-if [ $NoH -eq 1 ]; then
-	sed -i '/^H/d' sorted_XYMatrix.tmp
-	NAtoms=$(awk 'END{print NR}' sorted_XYMatrix.tmp)
-fi
+matfile=sorted_XYZMatrix.tmp
 
-matfile=sorted_XYMatrix.tmp
+if [ $NoH -eq 1 ]; then
+	sed -i '/^H/d' $matfile
+	NAtoms=$(awk 'END{print NR}' $matfile)
+fi
 
 
 for i in $(seq 1 $NAtoms); do
 	Symbol[$i]=$(awk 'FNR=='$i'{print $1}' $matfile)
 	X_values[$i]=$(awk 'FNR=='$i'{print $2}' $matfile)
 	Y_values[$i]=$(awk 'FNR=='$i'{print $3}' $matfile)
+	Z_values[$i]=$(awk 'FNR=='$i'{print $4}' $matfile)
 	if [ $Colors -eq 1 ]; then 
 		case ${Symbol[$i]} in
 			N[0-9]*) Color[$i]=$On_IBlue;;
-			#H[0-9]*) Color[$i]="$Grey"$On_IGrey;;
-			C[0-9]*) Color[$i]="$Black"$On_White;;
+			H[0-9]*) Color[$i]="$Black"$On_IGrey;;
+			C[0-9]*) Color[$i]="$White"$On_IBlack;;
+			O[0-9]*) Color[$i]=$On_Red;;
+			S[0-9]*) Color[$i]=$On_Yellow;;
 		esac
+	else
+		if [ ${Z_values[$i]} -lt 2 ]; then
+			Color[$i]=$IBlack
+		elif [ ${Z_values[$i]} -lt 4 ]; then
+			Color[$i]=${On_IBlack}${LightGrey}
+		elif [ ${Z_values[$i]} -ge 8 ]; then
+			Color[$i]=$BIWhite
+		else
+			Color[$i]=$NC
+		fi
 	fi
 done
 
@@ -368,5 +461,4 @@ done
 printf "\n"
 echo "-----------------------------------------------------------------------"
 
-rm sorted_XYMatrix.tmp 
-
+rm sorted_XYZMatrix.tmp 
