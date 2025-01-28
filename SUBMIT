@@ -8,7 +8,7 @@
 binpath=$HOME/bin/Submitter_Files
 orca_path=/cephyr/NOBACKUP/groups/rahmlab-storage/software/orca_5_0_3_linux_x86-64_shared_openmpi411/orca
 pythonenv_path=/cephyr/users/marcocap/Vera/venv/bin/activate
-xtb_path=/cephyr/NOBACKUP/groups/snic2020-6-11/ruizf/xtb/xtb_current/share/xtb/config_env.bash
+xtb_path=/cephyr/NOBACKUP/groups/rahmlab-storage/software/xtb-dist/share/xtb/config_env.bash
 
 #---------- Default settings. Can be changed at your own rsk -------------
 Time=12:00:00	#Default time limit in [D-]HH-MM-SS
@@ -210,7 +210,7 @@ for i in $(seq 1 $NF); do
 					FollowingStr=$(echo "$String" | awk '{print $('$i'+'$skip_idx')}')
 				done
 				SkipNext=$skip_idx
-				else
+			else
 				if [ $(echo $FollowingStr | grep "{") ]; then
 					printf "Error: argument $FollowingStr contains \"{\". Add a space please."
 					printf "\nProgram stopped by Error.\n"
@@ -682,7 +682,7 @@ sed -i 's/JBNAME/'$JobName'/' submitter.tmp
 sed -i 's/JBMEMORY/'$Memory'G/' submitter.tmp
 #sed -i 's/JBCPUMEMORY/'$MemoryPerCPU'/' submitter.tmp
 
-if [ $ProgramToRun == "amk" ] && [ $Cluster == "vera" ]; then
+if [ $Cluster == "vera" ]; then
 	sed -i 's/vera/vera --cpus-per-task=2/' submitter.tmp
 fi
 
@@ -691,6 +691,14 @@ if [ $ProgramToRun == "orca" ]; then
 	sed -i 's@ORCAPATH@'$orca_path'@' submitter.tmp
 fi
 
+if [ $ProgramToRun == "python" ] || [ $ProgramToRun == "ade" ] || [ $ProgramToRun == "ase" ]; then
+	sed -i 's@PYTHONENVPATH@'$pythonenv_path'@' submitter.tmp
+fi
+
+xtb_path
+if [ $ProgramToRun == "crest" ] || [ $ProgramToRun == "ade" ]; then
+        sed -i 's@XTBPATH@'$xtb_path'@' submitter.tmp
+fi
 
 if [ $MailUser -eq 1 ]; then
 	sed -i 's/USERNAME/'$USER'/' submitter.tmp
@@ -706,11 +714,12 @@ printf "\nLaunching \"$JobName\" on $Cluster...
 
 cat $binpath/ending.txt >> submitter.tmp
 
-#if [ $Nodes -ge 2 ]; then
-#	sed -i 's/##SBATCH --gres=ptmpdir:1/#SBATCH --gres=ptmpdir:1/' submitter.tmp
-#fi
+if [ $Nodes -ge 2 ]; then
+	sed -i 's/##SBATCH --gres=ptmpdir:1/#SBATCH --gres=ptmpdir:1/' submitter.tmp
+fi
 
 if [ $debug -eq 1 ]; then
+	echo "Exit without launching"
 	exit
 fi
 
