@@ -2,12 +2,13 @@
 #---------- SUBMIT -------------------------------------------------------
 #Script to submit jobs to slurm
 #Author: Marco Cappelletti github.com/cappecaps
-#Last update: 22 Aug 2024
+#Last update: 18 Nov 2024
 
-
-#---------- Get some variables -------------------------------------------
+#---------- Paths -----------------------------------------------
 binpath=$HOME/bin/Submitter_Files
-Cluster=$SNIC_RESOURCE
+orca_path=/cephyr/NOBACKUP/groups/rahmlab-storage/software/orca_5_0_3_linux_x86-64_shared_openmpi411/orca
+pythonenv_path=/cephyr/users/marcocap/Vera/venv/bin/activate
+xtb_path=/cephyr/NOBACKUP/groups/snic2020-6-11/ruizf/xtb/xtb_current/share/xtb/config_env.bash
 
 #---------- Default settings. Can be changed at your own rsk -------------
 Time=12:00:00	#Default time limit in [D-]HH-MM-SS
@@ -15,12 +16,13 @@ Nodes=1		#Default number of nodes
 Cores=32	#Default number of cores
 Memory=64  	#Default total memory in GB
 MailUser=0	#Default email: 0 = do not send email, 1 = send email
-InsertChk=0	#Insert %chk in gaussian input file? 0 = no, 1 = yes
-VeraProject=C3SE2024-1-5
+InsertChk=0	#Insert %chk in gaussian input file by default? 0 = no, 1 = yes
+VeraProject=C3SE2025-1-2
 LuxProject=C3SE508-22-1
 Tetralith=snic2022-5-502
 
 #--------- Other variables (do not change them) --------------------------
+Cluster=$SNIC_RESOURCE
 ReqNodes=0
 ReqCores=0
 ReqMem=0
@@ -29,6 +31,7 @@ debug=0
 SkipNext=0
 InputDetected=0
 ImplicitYes=0
+Ignore=0
 PJF=~/bin/QueueHistory/PendingJobs.txt
 RJF=~/bin/QueueHistory/RunningJobs.txt
 
@@ -39,7 +42,7 @@ PrintHelp(){
 	printf "Usage: SUBMIT [inputfile] [program (optional)] [additional options (optional)]    (order is irrelevant)\n\n"
 	printf "Supported programs:\n"
 	printf "\tg16 - Gaussian16 (.com)\n"
-	printf "\torca - ORCA 5.0.1 (.inp)\n"
+	printf "\torca - ORCA (custom version) (.inp)\n"
 	printf "\tcp2k - CP2K 7.1 (.inp)\n"
 	printf "\tpython - Regular Python script (.py)\n"
 	printf "\tade - Python script for AutoDE (.py)\n"
@@ -50,32 +53,33 @@ PrintHelp(){
 	printf "Additional options:\n"
 	printf "\t-m [filenames] - launch multiple jobs in succession (not implemented yet)\n"
 	printf "\t-t [time] - time limit (formats: Dd, HHh, MMm, HH:MM:SS or D-HH:MM:SS. Default = 12h, Max is 7d) Examples: -t 30m; -t 02h; -t 1d\n"
-	printf "\t-n [1-32] - number of cores (default = 32, Max on Vera = 32)    \n"
-	printf "\t-N [1-2]  - number of nodes (default = 1)    \n"
+	printf "\t-n [1-32] - number of cores (default = 32, Max on Vera = 32*N)    \n"
+	printf "\t-N [1-4]  - number of nodes (default = 1)    \n"
 	printf "\t-M [0-1024]  - total allocated memory in GB (default = 64). 0 means no memory limit is specified. \n" 
 	printf "\t-p [partition] - vera or lux (default = vera) \n"
 	printf "\t-J [job name] - sbatch job name (default = input file name, without extension. For vasp: vasp_[current folder])\n"
-	printf "\t[any other key(s)] - additional argument (only for bash, python and crest). Can be put in quotes. Example: SUBMIT this.sh \"arg1 arg2 arg3\" \n"
-	printf "\t--arg [argument] - same as above, when [argument] is conflicting with SUBMIT script (e.g. -n or -t). Again, \"[argument(s)]\" can be put in quotes.\n"
-	printf "\t--chk - (only for gaussian) put \%chk=[filename].chk on top of the input file. Overrides it if already present.\n"
+	printf "\t--arg { [argument(s)] } - additional argument (only for bash, python scripts and crest). Mind the space after \"{\" and before \"}\"!!\n"
+	printf "\t--chk - (only for gaussian) put \"%%chk=[filename].chk\" on top of the input file. Overrides it if already present.\n"
 	printf "\t--debug - prints a submitter.sh file and does NOT launch the calculation. It can be launched with \"sbatch submitter.sh\"\n"
 	printf "\t-y/--yes - implicitly say yes to questions. Use it at your own risk\n"
+	printf "\t-i/--ignore - ignore already running processes with the same job name. Use it at your own risk\n"
+	printf "\t-T/--tmpdir - copy input file(s) to the \$TMPDIR. Default = None.\n\n"
 
 	printf "\nPre-sets:  \n"
 	printf "\ttest\t- 8 cores, 16GB, 10 minutes\n"	
 	printf "\tshort\t- 16 cores, 32GB, 1 hour\n"
 	printf "\tlong\t- 32 cores, 64GB, 7 days\n"
 	printf "\nOther:\n"
-	printf "\tmailme\t- send email to the user when the job is finished. It takes you CID automatically and send it to CID@chalmers.se\n\n"
+	printf "\tmailme\t- send email to the user when the job is finished. It takes your CID automatically and send it to CID@chalmers.se\n\n"
 	printf "Examples:
 	SUBMIT test.com test
 	SUBMIT longassjob.inp cp2k -t 7d -M 196 -N 2 mailme
 	SUBMIT input.inp
 	SUBMIT vasp -t 06h 
 	SUBMIT CCSDT_SinglePoint.com -M 800 -t 1d
-	SUBMIT pythonscript.py -n 1 -t 10m
+	SUBMIT pythonscript.py -n 1 -t 10m --arg { -n 200 }
 	SUBMIT bashscript.sh 
-	SUBMIT bashscript.sh \"10 100 1000\"\n\n"
+	SUBMIT bashscript.sh --arg { 10 100 1000 }\n\n"
 }
 
 
@@ -84,8 +88,8 @@ PrintHelp(){
 ReadUserInput(){		#Read input after calling the script
 	
 for i in $(seq 1 $NF); do	
-	if [ $SkipNext -eq 1 ]; then
-		SkipNext=0
+	if [ $SkipNext -ge 1 ]; then
+		((SkipNext--))
 		continue
 	fi
 
@@ -164,8 +168,8 @@ for i in $(seq 1 $NF); do
 			;;
 
 		-N)	ReqNodes=1
-			if [ $FollowingStr -gt 2 ] || [ $FollowingStr -lt 1 ]; then
-                        	echo "-N limit exceeded: please use 1 or 2 nodes"
+			if [ $FollowingStr -gt 64 ] || [ $FollowingStr -lt 1 ]; then
+                        	echo "-N limit exceeded: please use up to 64 nodes"
                         	exit
                 	else
                         	Nodes=$FollowingStr
@@ -192,14 +196,35 @@ for i in $(seq 1 $NF); do
 			fi
 			SkipNext=1
 			;;
-		--arg)	printf "\nTaken \"$FollowingStr\" as argument (only valid for bash, python and crest!)\n"
-			Argument+=("$FollowingStr")
-			SkipNext=1;;
+		--arg)	if [ $FollowingStr == "{" ]; then
+				skip_idx=2
+				FollowingStr=$(echo "$String" | awk '{print $('$i'+'$skip_idx')}')
+				while [ $FollowingStr != "}" ]; do
+					if [ $(echo $FollowingStr | grep "}") ]; then
+						printf "Error: argument $FollowingStr contains \"}\". Add a space please."
+						printf "\nProgram stopped by Error.\n"
+						exit
+					fi
+					Argument+=("$FollowingStr")
+					((skip_idx++))
+					FollowingStr=$(echo "$String" | awk '{print $('$i'+'$skip_idx')}')
+				done
+				SkipNext=$skip_idx
+				else
+				if [ $(echo $FollowingStr | grep "{") ]; then
+					printf "Error: argument $FollowingStr contains \"{\". Add a space please."
+					printf "\nProgram stopped by Error.\n"
+					exit
+				fi
+				Argument+=("$FollowingStr")
+				SkipNext=1
+			fi;;
 		--chk)	InsertChk=1;;
 		-J)	ReqJobName=1
 			JobName=$FollowingStr
 			SkipNext=1;;
 		-y|--yes) ImplicitYes=1;;
+		-i|--ignore) Ignore=1;;
 		test)
 			Time=00:10:00
 			Cores=8
@@ -238,8 +263,11 @@ for i in $(seq 1 $NF); do
 			echo ">>>>>>>>>>>> This is a debug run. No calculation will be launched!! Regardless everything that the scripts says <<<<<<<<<<<<"	
 			debug=1;;
 		*)
-			printf "\nTaken \"$CurrStr\" as an argument (only valid for bash and python scripts!)\n"
-			Argument+=("$CurrStr")
+			printf "\nError: Don't know what \"$CurrStr\" is. Use --arg { args } to include arguments\n"
+			printf "Program stopped by Error.\n"
+			exit
+			#printf "\nTaken \"$CurrStr\" as an argument (only valid for bash and python scripts!)\n"
+			#Argument+=("$CurrStr")
 			;;
 	esac
 done
@@ -261,8 +289,9 @@ CheckInputFile() {
                         exit
          	fi
             	folder=$(echo $PWD | rev | cut -d '/' -f 1 | rev)
+		parentfolder=$(echo $PWD | rev | cut -d '/' -f 2 | rev | cut -d '/' -f 1)
 		if [ $ReqJobName -eq 0 ]; then
-               		JobName="vasp_$folder"
+               		JobName="vasp_${folder}_${parentfolder}"
                 fi
              	InputFile=INCAR
 		InputFileName=INCAR
@@ -371,14 +400,15 @@ GetProgramToRun(){		#If no program is specified, guess it based on both the inpu
 
 
 CheckRuns(){
+
 	if [ "$(squeue --me -h -n $JobName)" ]; then
 		CurrPath=$(echo $PWD | cut -d '/' -f 6-30 ) 	#as in Submitter_header.sh
-		if [ "$(awk '/'$JobName'/{print $4}' $RJF | grep "$CurrPath")" ]; then
+		if [ "$(awk '/'$JobName'/{print $4}' $RJF | grep "$CurrPath")" ] && [ $Ignore -eq 0 ]; then
 			echo "Error: This job is already running!"
 			echo "check your squeue and running jobs file"
 			echo ""
 			exit
-		elif [ "$(awk '/'$JobName'/{print $4}' $PJF | grep "$CurrPath")" ]; then
+		elif [ "$(awk '/'$JobName'/{print $4}' $PJF | grep "$CurrPath")" ] && [ $Ignore -eq 0 ]; then
 			echo "Error: This job is already pending!"
                         echo "check your squeue and pending jobs file"
 			echo ""
@@ -395,11 +425,11 @@ CheckRuns(){
                 	        exit
                 	fi
 		else
-			printf "\nAnswered yes implicitly. I'll proceede"
+			printf "\nAnswered yes implicitly. I'll proceede\n"
 		fi
 	fi
 	if [ -e $OutputFile ]; then
-		printf "\n"
+		#printf "\n"
 		echo "WARNING: this job has already been run. The output ("$OutputFile") will be overrided."
 		printf "What to you want to do?\n 0: stop\n 1: backup output file and continue\n 2: continue and override\n> "
                 read Ans
@@ -602,6 +632,11 @@ ReadUserInput  	#read $String one by one
 
 CheckInputFile	#check if there are other errors in the input string
 
+if [ $ProgramToRun == "bash" ] || [ $ProgramToRun == "python" ] || [ $ProgramToRun == "crest" ] || [ $ProgramToRun == "ase" ]; then
+        Arguments=$(echo ${Argument[@]})
+        printf "\nThe following command will be executed:\n\t$ProgramToRun $JobName.$ProgramInputExt $Arguments\n\n"
+fi
+
 CheckRuns
 
 CheckCluster
@@ -616,12 +651,9 @@ cp $binpath/Submit_Header.sh submitter.tmp		#Copy sample submitter from bin/Subm
 
 cat $binpath/"$ProgramToRun"_launcher.txt >> submitter.tmp
 
-
-
 if [ $ProgramToRun == "bash" ] || [ $ProgramToRun == "python" ] || [ $ProgramToRun == "crest" ] || [ $ProgramToRun == "ase" ]; then
-	Arguments=$(echo ${Argument[@]})
-	echo $Arguments
-	sed -i "s|ARGUMENT|$Arguments|g" submitter.tmp
+        Arguments=$(echo ${Argument[@]})
+        sed -i "s|ARGUMENT|$Arguments|g" submitter.tmp
 elif [ $Argument ]; then
         echo "Error: found a key ($Argument) but it's not a bash or python script"
         exit
@@ -634,9 +666,9 @@ if [ $Cores -lt $MaxCores ]; then
 	Memory=$(echo $" ($Memory * $Cores) / $MaxCores" | bc) 
 fi
 
-if [ $Memory -gt 0 ]; then
+if [ $Memory -gt 0 ] && ( [ $ProgramToRun == "g16" ] || [ $ProgramToRun == "orca" ] ); then
 	Memory=$(echo $" $Memory + 6 " | bc)
-else
+elif [ $Memory -eq 0 ]; then
 	sed -i 's/#SBATCH --mem/##SBATCH --mem/' submitter.tmp
 	Memory=None
 fi
@@ -655,6 +687,11 @@ if [ $ProgramToRun == "amk" ] && [ $Cluster == "vera" ]; then
 fi
 
 
+if [ $ProgramToRun == "orca" ]; then
+	sed -i 's@ORCAPATH@'$orca_path'@' submitter.tmp
+fi
+
+
 if [ $MailUser -eq 1 ]; then
 	sed -i 's/USERNAME/'$USER'/' submitter.tmp
 	sed -i 's/##SBATCH --mail-type/#SBATCH --mail-type/' submitter.tmp
@@ -669,9 +706,9 @@ printf "\nLaunching \"$JobName\" on $Cluster...
 
 cat $binpath/ending.txt >> submitter.tmp
 
-if [ $Nodes -ge 2 ]; then
-	sed -i 's/##SBATCH --gres=ptmpdir:1/#SBATCH --gres=ptmpdir:1/' submitter.tmp
-fi
+#if [ $Nodes -ge 2 ]; then
+#	sed -i 's/##SBATCH --gres=ptmpdir:1/#SBATCH --gres=ptmpdir:1/' submitter.tmp
+#fi
 
 if [ $debug -eq 1 ]; then
 	exit
