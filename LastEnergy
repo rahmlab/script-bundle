@@ -1,228 +1,282 @@
 #!/bin/bash
 
-MuteMode=0
-SuperMuteMode=0
-NoOverride=0
-ZPE=0
-Gibbs=0
-GibbsCorr=0
-Enthalpy=0
-FoundFiles=0
 Hartree=0
 eV=0
 kJmol=0
-Stoic=0
-Stoicnum=0
-Prec=6
+ZPE=0
+Gibbs=0
+Enthalpy=0
+GibbsCorr=0
 QH=0
-extraarg=""
-Temp=0
+PerUnit=0
+PerAtom=0
+Units=0
+ConcCorrection=0
+MuteMode=0
+SuperMuteMode=0
+CustTemp=0
+GetTemp=0
+Prec=6
+GetPrec=0
+Conc=0
+GetDiv=0
 PrintUnit=0
-Unit=kcal/mol
 re='^[0-9]+([.][0-9]+)?$'
-ReadNum=0
 
+GaussianCalc=0
+ORCACalc=0
+VaspCalc=0
 
-CheckEnding(){
-if [ "$(head $1 | grep "Gaussian, Inc.")" ]; then
-        if [ -z $(grep "Normal term" $1 | awk 'FNR==1{print $1}') ]; then
-                if [ $MuteMode -eq 0 ]; then
-                        printf "\nWarning: $1 didn't terminate right (or yet)!\n\n"
-		elif [ $SuperMuteMode -eq 0 ]; then
-                        printf "!"
-                fi
-                if [ $arg ]; then
-                        if [ $MuteMode -eq 0 ]; then
-                                printf "\nSecond warning: you can't ask for $arg in this case!\n"
-			elif [ $SuperMuteMode -eq 0 ]; then
-                                printf "X"
-                        fi
-                        exit
-                fi
-	fi
-fi
+kH=627.50947407
+kJ=262.54996395
+keV=27.211386246
+eV_to_Ha=0.0367493222
+R=8.31446262 #J/molK
+Rkcal=0.00198720426 #kcal/molK
+DGconc=1.894328445 #kcal/mol
 
-	
-}
-
-
-
-if [ -z $1 ] || [ $1 == "-h" ]; then
-        printf "\nDeltaE of Gaussian or ORCA output files. Use:\n\n"
-	printf " DeltaE  [ output file(s) (incl. ext.) ]  [ Request(s) (optional) ]   (Order of output files is relevant!)\n\n"
+if [ -z "$1" ] || [ "$1" == "-h" ]; then
+        printf "\nReturn the last energy of a Gaussian or a ORCA outputfile. Use:\n\n"
+	printf " LastEnergy  [ output file (incl. ext.) ]  [ Request(s) (optional) ]   (Order is irrelevant)\n\n"
         printf "Requests:\n\n"
-        printf " [none]\t\t\t- DeltaE of last electronic energies (E) in kcal/mol. Only for number of output files N = 2\n"
+	printf " [none]\t\t\t- Print last electronic energy (E) in kcal/mol\n"
         printf " -m/--mute\t\t- Mute mode: do not print errors, but symbols in case something goes wrong\n"
-        printf " -M/--supermute\t\t- do not print errors NOR symbols in case something goes wrong (use it with caution!)\n\n"
+	printf " -M/--supermute\t\t- do not print errors NOR symbols in case something goes wrong (use it with caution!)\n\n"
 	printf " -f/--prec\t\t- floating point precision\n\n"
-        printf " -a/--hartree\t\t- print energy in Hartree\n"
-        printf " -e/--eV\t\t\t- print energy in eV\n"
+	printf " -a/--hartree\t\t- print energy in Hartree\n"
+	printf " -e/--eV\t\t- print energy in eV\n"
 	printf " -J/--kJmol\t\t- print energy in kJ/mol\n"
-        printf " -z/--zpe\t\t- use E + ZPE\n"
-        printf " -H/--enthalpy\t\t- use enthalpy (E + H)\n"
-        printf " -G/--gibbs\t\t- use Gibbs free energy (E + G_corr). Print an error if not available\n"
-        printf " -c/--gcorr\t\t- use thermal correction to Gibbs free energy (G_corr)\n"
-        printf " -q/--quasiharmonic\t- use quasi-harmonic Gibbs free energy. It needs goodvibes python package\n"
-	printf " -C/--conc [float/int]\t- concentration correction in Molar. Default is 298.15K = 1.894... \n"
-        printf " -T [integer]\t\t- (after -q) specifies temperature\n"
-        printf " -s/--stoic [integers]\t- define stoichiometry. The number of intergers must be equivalent to N\n"
-	printf " -A/--per-atom\t\t- calculate differences of atomic energies\n"
-	printf " -d/--div [integer]\t- divide the result by that number\n"
+	printf " -z/--zpe\t\t- print E + ZPE\n"
+	printf " -H/--enthalpy\t\t- print enthalpy (E + H)\n"
+	printf " -G/-g/--gibbs\t\t- print Gibbs free energy (E + G_corr). Print an error if not available\n"
+	printf " -c/--gcorr\t\t- print thermal correction to Gibbs free energy (G_corr)\n"
+	printf " -q/--quasiharmonic\t- print quasi-harmonic Gibbs free energy. It needs goodvibes python package\n"
+	printf " -C/--conc [float/int]\t- concentration correction in Molar. Default is 298.15K = 1.894...\n"
+	printf " -T [float/int]\t\t- (after -q) specifies temperature\n"
+	printf " -A/--per-atom\t\t- divide the final output by number of atoms\n"
+	printf " -d/--div [float/int]\t- divide the final output by integer\n"
 	printf " -u/--print-unit\t- print unit after value\n"
-
+	
         printf "\n"
 	exit
-fi
-
+fi	
 
 String=$(echo $*)
 
 
+re='^[0-9]+$'
 for i in $String; do
-	if [ $ReadNum -eq 1 ]; then
-		if ! [[ $i =~ $re ]]; then
-			echo "Error: expected number after $option"
-			exit
-		else
-			args+=($i)
-			ReadNum=0
-		fi
-
-	elif [ $i == "-m" ]; then
-                MuteMode=1
-	elif [ $i == "-M" ]; then
+        if [ $i == "-a" ] || [ $i == "--hartree" ]; then
+                Hartree=1
+	elif [ $i == "-e" ] || [ $i == "--eV" ]; then
+		eV=1
+	elif [ $i == "-J" ] || [ $i == "--kJmol" ]; then
+		kJmol=1
+        elif [ $i == "-z" ] || [ $i == "--zpe" ]; then
+                ZPE=1
+	elif [ $i == "-g" ] || [ $i == "-G" ] || [ $i == "--gibbs" ]; then
+		Gibbs=1
+	elif [ $i == "-H" ] || [ $i == "--enthalpy" ]; then
+                Enthalpy=1
+	elif [ $i == "-c" ] || [ $i == "--gcorr" ]; then
+		GibbsCorr=1
+	elif [ $(echo $i | grep ".out\|.log") ]; then
+       		filename=$i
+	elif [ $i == "-d" ] || [ $i == "--div" ]; then
+		GetDiv=1
+		PerUnit=1
+	elif [ $GetDiv -eq 1 ] && [[ $i =~ $re ]]; then
+		Units=$i
+		GetDiv=0
+	elif [ $i == "-A" ] || [ $i == "--per-atom" ]; then
+                 PerAtom=1
+	elif [ $i == "-C" ] || [ $i == "--conc" ]; then
+		ConcCorrection=1
+	elif [ $ConcCorrection -eq 1 ] && [[ $i =~ $re ]]; then
+		Conc=$i
+		ConcCorrection=0
+	elif [ $i == "-m" ] || [ $i == "--mute" ]; then
+		MuteMode=1
+	elif [ $i == "-M" ] || [ $i == "--supermute" ]; then
 		MuteMode=1
 		SuperMuteMode=1
-        elif [ $i == "-z" ] || [ $i == "--zpe" ]; then
-		if [ $NoOverride -eq 1 ]; then
-			echo "Error: clashing arguments"
-			exit
-		fi
-		args+=($i)
-		NoOverride=1
-	elif [ $i == "-G" ] || [ $i == "-g" ] || [ $i == "--gibbs" ]; then
-		if [ $NoOverride -eq 1 ]; then
-                        echo "Error: clashing arguments"
-                        exit
-                fi
-                args+=($i)
-                NoOverride=1
-	elif [ $i == "-c" ] || [ $i == "--gcorr" ]; then
-		if [ $NoOverride -eq 1 ]; then
-                        echo "Error: clashing arguments"
-                        exit
-                fi
-                args+=($i)
-                NoOverride=1
-	elif [ $i == "-H" ] || [ $i == "--enthalphy" ]; then
-		if [ $NoOverride -eq 1 ]; then
-                        echo "Error: clashing arguments"
-                        exit
-                fi
-                args+=($i)
-                NoOverride=1
-	elif [ $i == "-a" ] || [ $i == "--hartree" ]; then
-		Unit=Hartree
-		args+=($i)
-		Prec=9
-	elif [ $i == "-e" ] || [ $i == "--eV" ]; then
-		Unit=eV
-		args+=($i)
-	elif [ $i == "-f" ] || [ $i == "--prec" ]; then
-                args+=($i)
-		option=$i
-		ReadNum=1
-	elif [ $i == "-J" ] || [ $i == "--kJmol" ]; then
-		Unit=kJ/mol
-                args+=($i)
-	elif [ $i == "-s" ] || [ $i == "--stoic" ]; then
-                Stoic=1
 	elif [ $i == "-q" ] || [ $i == "--quasiharmonic" ]; then
-		 if [ $NoOverride -eq 1 ]; then
-                        echo "Error: clashing arguments"
-                        exit
-                fi
-                args+=($i)
-                NoOverride=1
-	elif [ $(echo $i | grep "^[0-9]*") ] && [ $Stoic -eq 1 ]; then
-		StoicValues+=("$i")
-	elif [ $(echo $i | grep ".out\|.log") ] || [ $(echo $i | grep "OUTCAR") ]; then
-		if [ ! -e $i ]; then
-			echo "$i doesn't exist!"
-			exit
-		fi
-		Files+=("$i")
+		Gibbs=1
+		QH=1
 	elif [ $i == "-T" ]; then
-                args+=($i)
-		option=$i
-		ReadNum=1
-        elif [ $i == "-A" ] || [ $i == "--per-atom" ]; then
-		args+=($i)
-	elif [ $i == "-d" ] || [ $i == "--div" ]; then
-                args+=($i)
-		option=$i
-		ReadNum=1
+		GetTemp=1
+	elif [ $GetTemp -eq 1 ] && [[ $i =~ $re ]]; then
+		Temp=$i
+		GetTemp=0
+		CustTemp=1
+	elif [ $i == "-f" ]; then
+		GetPrec=1
+        elif [ $GetPrec -eq 1 ] && [[ $i =~ $re ]]; then
+                Prec=$i
+		GetPrec=0
+	elif [ $(echo $i | grep "OUTCAR") ]; then
+		filename=$i
+		VaspCalc=1
 	elif [ $i == "-u" ] || [ $i == "--print-unit" ]; then
-                PrintUnit=1
-	else
+		PrintUnit=1
+	else 
 		echo "Can't understand $i"
 		exit
         fi
-
-	if [ $Stoic -eq 1 ] && ! [ $(echo $i | grep "^[0-9]*") ]; then
-		Stoic=0
-	fi
-	
-done
-
-if [ $ReadNum -eq 1 ]; then
-	echo "Error: expected number after $option"
-	exit
-fi
-
-if [ ${#Files[@]} -eq 0 ]; then
-	echo "Error: I need at least one file"
-	exit
-elif [ ${#Files[@]} -ge 3 ] && [ ${#StoicValues[@]} -eq 0 ]; then
-	echo "Error: I need stoichiometry with 3 or more files"
-	echo "Example:    DeltaE file1.out file2.out file3.out -Stoic 1 1 -2"
-        exit
-fi
-
-if [ $Stoic -eq 1 ] && [ ${#StoicValues[@]} -eq 0 ]; then
-	echo "Error: -Stoic needs some numbers after it"
-	echo "Example:    DeltaE file1.out file2.out file3.out -Stoic 1 1 -2"
-        exit
-elif [ $Stoic -eq 1 ] && [ ${#Files[@]} -ne ${#StoicValues[@]} ]; then
-	echo "Error: Stoichiometry values must respect the number of files"
-	echo "Example:    DeltaE file1.out file2.out file3.out -Stoic 1 1 -2"
-	exit
-fi
-	
-
-for k in ${Files[@]}; do
-	CheckEnding $k
-	Energies+=("$(LastEnergy $k ${args[@]})")
 done
 
 
-if [ $Stoic -eq 0 ]; then
-	if [ ${#Files[@]} -eq 1 ]; then
-		printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '${Energies[0]}' )}')"
-	else
-		printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '${Energies[0]}' - '${Energies[1]}' )}')"
+if [ $PerUnit -eq 1 ] && [ $Units -eq 0 ]; then
+	echo "Error: enter the number of units after div: LastEnergy Filename div [n] "
+	exit
+fi
+
+if [ -z $filename ]; then
+	if [ $MuteMode -eq 0 ]; then
+		echo "I need an output file"
+	elif [ $SuperMuteMode -eq 0 ]; then
+		echo "?"
 	fi
+	exit
+elif [ ! -e $filename ]; then
+	if [ $MuteMode -eq 0 ]; then
+		echo "$filename does not exist!"
+	elif [ $SuperMuteMode -eq 0 ]; then
+                echo "?"
+	fi
+	exit
+fi
+
+
+cat $filename > lastenergy.tmp.log
+
+currfile=$filename
+filename="lastenergy.tmp.log"
+
+
+
+if [ "$(head $filename | grep "Gaussian, Inc.")" ]; then
+	GaussianCalc=1
+elif [ "$(head $filename | grep "O   R   C   A")" ]; then
+	ORCACalc=1
+elif [ "$(head -n1 $filename | grep "vasp")" ]; then
+	VaspCalc=1
 else
-	TmpEnergy=0
-	for n in $(seq 0 $((${#Energies[@]}-1))); do
-		TmpEnergy=$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$TmpEnergy' + '${StoicValues[$n]}' * '${Energies[$n]}' )}')
-	done
-	printf -- "$TmpEnergy"
+	echo "Error: unrecognized output file"
+	exit
 fi
 
+
+if [ $GaussianCalc -eq 1 ]; then
+        if [ $ZPE -eq 1 ]; then
+                HartreeEnergy=$(grep "Sum of electronic and zero-point" $filename | awk '{print $7}')
+	elif [ $Gibbs -eq 1 ]; then
+		if [ $QH -eq 0 ]; then
+			HartreeEnergy=$(grep "Sum of electronic and thermal Free Energies" $filename | tail -1 | awk '{print $8}')
+		elif [ $CustTemp -eq 1 ]; then
+			HartreeEnergy=$(python -m goodvibes -t $Temp $filename 2>/dev/null | grep -A2 "qh-G(T)" | awk 'FNR==3{print $9}')
+			rm Goodvibes_output.dat
+		else
+                        HartreeEnergy=$(python -m goodvibes $filename 2>/dev/null | grep -A2 "qh-G(T)" | awk 'FNR==3{print $9}')
+			rm Goodvibes_output.dat
+                fi
+	elif [ $Enthalpy -eq 1 ]; then
+	        HartreeEnergy=$(grep "Sum of electronic and thermal Enthalpies" $filename | tail -1 | awk '{print $7}')
+	elif [ $GibbsCorr -eq 1 ]; then
+		HartreeEnergy=$(grep "Thermal correction to Gibbs Free Energy=" $filename | tail -1 | awk '{print $7}')
+        else
+		if [ "$(grep "E(CORR)" $filename)" ]; then
+			HartreeEnergy=$(grep "E(CORR)" $filename | tail -1 | awk '{print $4}')
+		elif [ "$(grep "E(B2PLYP" $filename)" ] || [ "$(grep "E(RB2PLYP" $filename)" ] || [ "$(grep "E(UB2PLYP" $filename)" ]; then
+			HartreeEnergy=$(grep "E(B2PLYP" $filename | tail -1 | awk '{print $6}' | sed 's/D/E/' | awk '{printf "%.9f\n", $0}')
+		elif [ "$(grep "EUMP2=" $filename)" ]; then
+			HartreeEnergy=$(grep "EUMP2=" $filename | tail -1 | awk '{print $4}' | sed 's/D/E/' | awk '{printf "%.9f\n", $0}')
+		elif [ -z "$(grep "E(" $filename | grep "MP")" ] && [ "$(grep "SCF Done:" $filename)" ]; then
+                        HartreeEnergy=$(grep "SCF Done:" $filename | tail -1 | awk '{print $5}')
+		else
+			echo "Method unknown"
+			exit
+		fi
+        fi
+elif [ $ORCACalc -eq 1 ]; then
+        if [ $Gibbs -eq 1 ]; then
+                HartreeEnergy=$(awk '/Final Gibbs free energy/{print $6}' $filename | tail -1)
+        elif [ $Enthalpy -eq 1 ]; then
+                HartreeEnergy=$(awk '/Total enthalpy/{print $4}' $filename)
+        elif [ $ZPE -eq 1 ]; then
+                RawHartreeEnergy=$(grep "FINAL SINGLE POINT ENERGY" $filename | awk 'END{print $5}')
+                ZPECorrection=$(grep "Non-thermal (ZPE) correction" $filename | awk '{print $4}')
+                HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$ZPECorrection' + '$RawHartreeEnergy' )}')
+        elif [ $GibbsCorr -eq 1 ]; then
+                HartreeEnergy=$(awk '/G-E\(el)/{print $3}' $filename)
+        else
+                HartreeEnergy=$(grep "FINAL SINGLE POINT ENERGY" $filename | awk 'END{print $5}')
+        fi
+elif [ $VaspCalc -eq 1 ]; then
+	HartreeEnergy=$(grep "energy(sigma->0)" $filename | awk 'END{printf "%.9f\n", $7*'$eV_to_Ha'}')
+	if (( $(echo "$HartreeEnergy == 0.00" |bc -l) )); then
+		HartreeEnergy=$(grep "free  energy   TOTEN" $filename | awk 'END{printf "%.9f\n", $5*'$eV_to_Ha'}')
+	fi
+fi
+
+
+if [ -z $HartreeEnergy ] || ( [ $GaussianCalc -eq 1 ] && (( $(echo "$HartreeEnergy == 0.00" |bc -l) )) && [ $(grep "alpha electrons" $filename | awk 'FNR==1{print $1*2}') -ne 0 ] ); then
+	if [ $MuteMode -eq 0 ]; then
+                echo "Something went wrong!"
+        elif [ $SuperMuteMode -eq 0 ]; then
+                echo "X"
+        fi
+	exit 
+fi
+
+
+if [ $PerUnit -eq 1 ] && [ $Units -gt 0 ]; then
+	HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$HartreeEnergy' / '$Units'  )}') 
+elif [ $PerAtom -eq 1 ]; then
+	if [ $GaussianCalc -eq 1 ]; then
+		NAtoms=$(awk '/NAtoms/{print $2}' $filename | head -1)
+	elif [ $ORCACalc -eq 1 ]; then
+		NAtoms=$(awk '/Number of atoms/{print $5}' $filename | head -1)
+	fi
+	HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$HartreeEnergy' / '$NAtoms'  )}')
+fi
+
+
+if (( $(echo "$Conc != 0" |bc -l) )); then
+	if [ $Gibbs -eq 0 ]; then
+		echo "Error: concentration correction is valid only for Gibbs free energy"
+		exit
+	elif [ $CustTemp -eq 1 ]; then
+		DGconc=$(awk 'BEGIN{printf ( "%.9f\n", '$Rkcal' * '$Temp' * log( ( '$R' * '$Temp' ) / 101.325 )   )}')
+		HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$HartreeEnergy' + ( '$DGconc' / '$kH' ) )}')
+	else	
+		HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$HartreeEnergy' + ( '$DGconc' / '$kH' ) )}')
+	fi
+fi
+
+
+if [ $Hartree -eq 1 ]; then
+	printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$HartreeEnergy' )}')"
+elif [ $eV -eq 1 ]; then
+	printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$HartreeEnergy' * '$keV'  )}')"
+elif [ $kJmol -eq 1 ]; then
+	printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$HartreeEnergy' * '$kJ'  )}')"
+else
+        printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$HartreeEnergy' * '$kH'  )}')"
+fi
 
 if [ $PrintUnit -eq 1 ]; then
-	echo " $Unit"
+	if [ $Hartree -eq 1 ]; then
+		echo " Ha"
+	elif [ $eV -eq 1 ]; then
+		echo " eV"
+	elif [ $kJmol -eq 1 ]; then
+		echo " kJ/mol"
+	else
+		echo " kcal/mol"
+	fi
 else
 	echo ""
 fi
+
+rm lastenergy.tmp.log
