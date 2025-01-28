@@ -1,9 +1,14 @@
 #!/bin/bash
 
 RJF=/cephyr/users/$USER/Vera/bin/QueueHistory/RunningJobs.txt
+PJF=/cephyr/users/$USER/Vera/bin/QueueHistory/PendingJobs.txt
 TMPID=/cephyr/users/$USER/Vera/bin/QueueHistory/TMPID.tmp
 
 NoUpdate=0
+
+DeleteJob=0
+
+re='^[0-9]+([.][0-9]+)?$'
 
 CheckCompleted (){
 	detected=0
@@ -11,10 +16,15 @@ CheckCompleted (){
 	if [ $oldestdate ]; then
 		sacct -X -S $oldestdate -o JobID,State,End -n | awk '{print $1,$2,$3}' > $TMPID
 	fi
-	maxNchar=$(awk 'BEGIN{a=0}{if (length($2)>0+a) a=length($2)} END{print a+3}' $RJF)
-        maxNtabs=$(echo $"$maxNchar / 8" | bc)
+	#maxNchar=$(awk 'BEGIN{a=0}{if (length($2)>0+a) a=length($2)} END{print a+3}' $RJF)
+	maxNtabs=$(echo $"$maxNchar / 8" | bc)
 
-	for CurrJobID in $(awk '{print $1}' $RJF); do
+	RunningJobIDs=$(awk '{print $1}' $RJF)
+	for CurrJobID in $RunningJobIDs; do
+		if [ -z $(awk '/'$CurrJobID'/{print NR}' $RJF) ]; then
+			echo "Warning: wrong line in $RJF: \"$CurrJobID\""
+			continue
+		fi
 		i=$(awk '/'$CurrJobID'/{print NR}' $RJF)
 		CurrJobName=$(awk 'FNR=='$i'{print $2}' $RJF)
 		CurrJobDate==$(awk 'FNR=='$i'{print $3}' $RJF)
@@ -42,6 +52,8 @@ CheckCompleted (){
 				sed -i "${i}d" $RJF
 				EndTime=$(cat $TMPID | awk /''$CurrJobID'/{print $3}')
                                 printf ">> CANCELLED\t"
+				PJFline=$(awk '/'$CurrJobName'/{print NR}' $PJF | head -n1)
+				sed -i "${PJFline}d" $PJF
                                 ;;
 			TIMEOUT)
 				sed -i "${i}d" $RJF
@@ -61,7 +73,7 @@ CheckCompleted (){
 		esac
 		printf "$CurrJobID\tat $EndTime\n\t$CurrJobName"
 		Nchar=${#CurrJobName}
-                Ntabs=$(echo $"$maxNtabs - ( $Nchar / 8 ) +1 " | bc)
+		Ntabs=$(echo $"$maxNtabs - ( $Nchar / 8 ) +1 " | bc)
                 for tabs in $(seq 1 $Ntabs); do printf "\t"; done
 		printf "  $CurrJobPath\n"
 		fi
@@ -82,37 +94,89 @@ CheckCompleted (){
 }
 
 
-NRunningJobs=$(squeue --me -h | awk 'END{print NR}')
-maxPchar=$(awk 'BEGIN{a=0}{if (length($2)>0+a) a=length($2)} END{print a+3}' $RJF)
+NRunningJobs=$(squeue --me -h -o "%.6T" | grep "RUNN" | awk 'END{print NR}')
+NPendingJobs=$(squeue --me -h -o "%.6T" | grep "PEND" | awk 'END{print NR}')
+
+JobNames=$(squeue --me -h -o "%60j")
+maxNchar=0
+
+for jobname in $JobNames; do
+	currnchar=${#jobname}
+	if [ $currnchar -gt $maxNchar ]; then
+		maxNchar=$currnchar
+	fi
+done
+
 
 if [ $1 ] && [ $1 == "-r" ]; then
-	if [ $NRunningJobs -eq 0 ]; then
-		printf "No running jobs at $(date '+%Y-%m-%dT%H:%M:%S')\n\n"
+	if [ $NRunningJobs -eq 0 ] && [ $NPendingJobs -eq 0 ]; then
+		printf "No running nor pending jobs at $(date '+%Y-%m-%dT%H:%M:%S')\n\n"
+		exit
+	elif [ $NRunningJobs -eq 0 ] && [ $NPendingJobs -ge 1 ]; then
+		printf "$NPendingJobs pending jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
+		awk '{printf "%-8s %-'$maxNchar's %-1s\n", $1,$2,$4}' $PJF
+                exit
+	elif [ $NRunningJobs -ge 1 ] && [ $NPendingJobs -eq 0 ]; then
+		printf "Running jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
+		awk '{printf "%-8s %-'$maxNchar's %-1s\n", $1,$2,$4}' $RJF
+		echo ""
+		exit
 	else
-                printf "Running jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
-                awk '{printf "%-8s %-'$maxPchar's %-1s\n", $1,$2,$4}' $RJF
+		printf "Running jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
+                awk '{printf "%-8s %-'$maxNchar's %-1s\n", $1,$2,$4}' $RJF
+		echo ""
+		printf "$NPendingJobs pending jobs at $(date '+%Y-%m-%dT%H:%M:%S') (according to last squeue):\n\n"
+                awk '{printf "%-'$maxNchar's %-1s\n", $1,$2}' $PJF
 		echo ""
 		exit
 	fi
 elif [ $1 ] && [ $1 == "-n" ]; then
 	NoUpdate=1
+elif [ $1 ] && [ $1 == "-d" ]; then
+	DeleteJob=1
 elif [ $1 ]  && [ $1 == "-h" ]; then
 	printf "\nssq - check Vera calculations. Options:\n\n"
 	printf "\t[none]:\tPrint your queue\n"
-	printf "\t-r\tPrint running jobs folder\n"
-	printf "\t-n\tPrint queue but do not update the history of running jobs. Finished jobs are kept in memory.\n\n"
+	printf "\t-r\tPrint running and pending job folders\n"
+	printf "\t-n\tPrint queue but do not update the history\n"
+	printf "\t-d\tDelete a job. You choose it\n\n"
+	exit
+fi
+
+if [ $DeleteJob -eq 1 ]; then
+	awk '{printf "%-2s- %-8s %-20s %-12s %30s\n" , NR, $1, $2, $3, $4}' $RJF
+	NRjobs=$(awk 'END{print NR}' $RJF)
+	printf "\nWhich job do you want to delete? Insert numbers separated by spaces\n> "
+	read deljobs
+	printf "\n"
+	for deljobi in $deljobs; do
+		if [ $deljobi -gt $NRjobs ] || [ $deljobi -le 0 ]; then
+			echo "Error: out of bound index $deljobi"
+			continue
+		elif ! [[ $deljobi =~ $re ]]; then
+			echo "Error: please insert a number"
+			continue
+		else
+			jobid=$(awk 'FNR=='$deljobi'{print $1}' $RJF)
+			jobname=$(awk 'FNR=='$deljobi'{print $2}' $RJF)
+			echo "$deljobi - scancelling $jobid, $jobname..."
+			echo ""
+			scancel $jobid
+		fi
+	done
+	echo "Done."
 	exit
 fi
 
 
 col=$(stty size | cut -d" " -f2)
 
-if [ $col -ge $(echo $"$maxPchar + 73" | bc) ]; then
-        Nspaces=$(echo $"$maxPchar + 73" | bc)
-elif [ $col -ge $(echo $"$maxPchar + 40" | bc) ]; then
-        Nspaces=$(echo $"$maxPchar + 40" | bc)
-elif [ $col -ge $(echo $"$maxPchar + 31" | bc) ]; then
-        Nspaces=$(echo $"$maxPchar + 31" | bc)
+if [ $col -ge $(echo $"$maxNchar + 79" | bc) ]; then
+	Nspaces=$(echo $"$maxNchar + 79" | bc)
+elif [ $col -ge $(echo $"$maxNchar + 68" | bc) ]; then
+	Nspaces=$(echo $"$maxNchar + 68" | bc)
+elif [ $col -ge $(echo $"$maxNchar + 59" | bc) ]; then
+	Nspaces=$(echo $"$maxNchar + 59" | bc)
 else
 	Nspaces=64
 fi
@@ -122,21 +186,23 @@ if [ -z $NRunningJobs ]; then
 	NRunningJobs=0
 fi
 
-if [ $NRunningJobs -gt 0 ]; then
+if [ $NRunningJobs -gt 0 ] || [ $NPendingJobs -gt 0 ]; then
 
-echo "$NRunningJobs running jobs at $(date '+%Y-%m-%dT%H:%M:%S'):"
+echo "$NRunningJobs running jobs and $NPendingJobs pending jobs at $(date '+%Y-%m-%dT%H:%M:%S'):"
 for i in $(seq 1 $Nspaces); do
 	printf "-"
 done
 printf "\n"
 
 
-if [ $col -ge $(echo $"$maxPchar + 73" | bc) ]; then
-        squeue --me -o "%.8A %."$maxPchar"j %.5P %.5T %.16S %.10M %.10l %.4C %.7m"
-elif [ $col -ge $(echo $"$maxPchar + 40" | bc) ]; then
-        squeue --me -o "%.8A %."$maxPchar"j %.5P %.5T %.16S %.10M %.10l %.4C"
-elif [ $col -ge $(echo $"$maxPchar + 31" | bc) ]; then
-        squeue --me -o "%.8A %."$maxPchar"j %.5P %.4T %.16S %.10M %.10l"
+
+
+if [ $col -ge $(echo $"$maxNchar + 78" | bc) ]; then
+        squeue --me -o "%.8A %."$maxNchar"j %.5T %.16S %.10M %.10l %.2D %.4C %.7m %.8N"
+elif [ $col -ge $(echo $"$maxNchar + 68" | bc) ]; then
+        squeue --me -o "%.8A %."$maxNchar"j %.5T %.16S %.10M %.10l %.4C %.8N"
+elif [ $col -ge $(echo $"$maxNchar + 59" | bc) ]; then
+	squeue --me -o "%.8A %."$maxNchar"j %.4T %.16S %.10M %.10l"
 else
 	squeue --me -o "%.8A %.18j %.3P %.4T %.16S %.10M"
 fi
@@ -156,4 +222,3 @@ if [ $NoUpdate -eq 0 ]; then
 else
 	printf "No update requested (-n). Finished jobs are not displayed, but still in memory.\n"
 fi
-
