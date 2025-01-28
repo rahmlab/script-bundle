@@ -2,7 +2,7 @@
 A collection of useful scripts.
 
 ## Installation
-Download the entire bundle and extract the zip file as it is in your bin folder in Vera. You may have to make them excecutable with
+Download the entire bundle and extract the zip file as it is in your bin folder in Vera. You may have to make all scripts excecutable with
 
 	chmod u+x [script]
 
@@ -27,7 +27,7 @@ Launches calculations for you. Goes with "Submitter_Files" folder, that should b
 - crest
 
 #### ssq
-Check and keep track of jobs 
+Check and keep track of your jobs 
 
 #### pww
 To move files between Vera and local. It just prints for you the scp command to copy and paste.
@@ -44,10 +44,10 @@ Fammi means "do me"/"do for me" and it's a simple calculator. E.g. Fammi "2+2"
 #### OutputToInput
 Analyzes Gaussian16 output files. Very powerful but limited. I need help to make it better
 
-#### LastEnergy (working for orca too)
+#### LastEnergy (g16 and orca only)
 Gets last energy from an output. You can choose the unit, ZPE, H, G, quasi-harmonic G, G corr, atomic energy.
 
-#### DeltaE (working for orca too)
+#### DeltaE (g16 and orca only)
 Works together with LastEnergy and prints the DeltaE (or ZPE, H, G, ...) of two or more calculations. You can choose the stioichiometry.
 
 #### PrintMolecule
