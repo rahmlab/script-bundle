@@ -5,7 +5,7 @@ INPext=com
 OUText=log
 
 
-# Last update: 19/07/2022
+# Last update: 28/01/2025
 
 # to add: with Opt(Cartesian) the first two matrices are NOT input + standard orientation, but Z-matrix orientation + standard orientation, then the regular input+std
 
@@ -171,6 +171,20 @@ GetOutputFile (){
 	
 }
 
+
+CheckInputErrors() {
+	ErrMsgs=("A syntax error was detected in the input line" \
+		 "Charge and Multiplicity card seems defective" \
+		 "Found a string as input")
+
+	for msg in "${ErrMsgs[@]}"; do
+		if [ "$(grep "$msg" $tmpfile)" ]; then
+			printf "\nProgram stopped: error in the input file! Error:\n\t\"$msg\""
+			StoppedBy Error 
+		fi
+	done
+
+}
 
 ConvergedYES (){
 	if [ -z $1 ]; then
@@ -692,13 +706,13 @@ ReadUserOptions (){
 				echo ""
                         fi
 			if [ $NormalTerm -eq 1 ] && [ $IRCCalc -eq 0 ]; then
-				Printf "\tElectronic energy:\t $(LastEnergy $OutputFile) kcal mol^-1\n"
+				Printf "\tElectronic energy:\t $(LastEnergy $OutputFile -u)\n"
 			elif [ $ErrorTerm -ne 1 ] && [ $Steps -gt 0 ] && [ $IRCCalc -eq 0 ] && [ $OptScanCalc -eq 0 ]; then
 				Printf "\tLast electronic energy:\t $(LastEnergy $OutputFile) kcal mol^-1\n"
 			fi
 			if [ $FreqCalc -eq 1 ] && [ $CalcDone -eq 1 ] && [ $NormalTerm -eq 1 ]; then
-				Printf "\tGibbs free energy:\t $(LastEnergy $OutputFile -g) kcal mol^-1\n"
-				Printf "\tqh-G (Grimme RRHO):\t $(LastEnergy $OutputFile -g -q 2>/dev/null) kcal mol^-1\n"
+				Printf "\tGibbs free energy:\t $(LastEnergy $OutputFile -u -g)\n"
+				Printf "\tqh-G (Grimme RRHO):\t $(LastEnergy $OutputFile -u -g -q 2>/dev/null)\n"
 				Printf "\tLowest frequency: $LowestFreq cm^-1\n"
 				freq_NF=3
 				freq_NR=1
@@ -759,24 +773,24 @@ ReadUserOptions (){
 			echo ""
 			exit
 		elif [ $CurrStr == "--Energy" ] || [ $CurrStr == "-E" ]; then
-			Printf "print computed energy of all steps\n\n"
+			Printf "print computed energies of all steps\n\n"
 			printf "Step\tE (kcal/mol)\tDE step\t Perc change\n"
-                        E_first=$(grep  "E([R,U]" $tmpfile | awk 'FNR==1{printf ( "%.6f\n", $5 * '$kH'  )}')
-                        E_0=$(grep  "E([R,U]" $tmpfile | awk 'FNR==1{printf ( "%.3f\n", $5 * '$kH'  )}')
-                        echo "1:" $E_0 | awk '{printf "%4s %14s\n", $1, $2}'
-                        for m in $(seq 2 $Steps); do
-                                E_currm=$(grep  "E([R,U]" $tmpfile | awk 'FNR=='$m'{printf ( "%.6f\n", $5 * '$kH'  )}')
-                                if [ $m -eq 2 ]; then
-                                        E_precm=$E_first
-                                fi
-                                dEfirst=$(awk 'BEGIN{printf ( "%.4f\n", '$E_currm' - '$E_first'  )}')
-                                dEprec=$(awk 'BEGIN{printf ( "%.4f\n", '$E_currm' - '$E_precm'  )}')
-                                perc_change=$(awk 'BEGIN{printf ( "%.2e\n", - ( '$E_currm' - '$E_precm' ) / '$E_precm'  * 100 )}')
-                                echo "$m:" $dEfirst $dEprec $perc_change | \
-                                                awk '{printf "%4s %14s %10s %11s\n", $1, $2, $3, $4}'
-                                E_precm=$E_currm
-                        done
-                        printf "\n"
+			E_first=$(grep  "E([R,U]" $tmpfile | awk 'FNR==1{printf ( "%.6f\n", $5 * '$kH'  )}')
+			E_0=$(grep  "E([R,U]" $tmpfile | awk 'FNR==1{printf ( "%.3f\n", $5 * '$kH'  )}')
+			echo "1:" $E_0 | awk '{printf "%4s %14s\n", $1, $2}'
+			for m in $(seq 2 $Steps); do
+				E_currm=$(grep  "E([R,U]" $tmpfile | awk 'FNR=='$m'{printf ( "%.6f\n", $5 * '$kH'  )}')
+				if [ $m -eq 2 ]; then
+					E_precm=$E_first
+				fi
+				dEfirst=$(awk 'BEGIN{printf ( "%.4f\n", '$E_currm' - '$E_first'  )}')
+				dEprec=$(awk 'BEGIN{printf ( "%.4f\n", '$E_currm' - '$E_precm'  )}')
+				perc_change=$(awk 'BEGIN{printf ( "%.2e\n", - ( '$E_currm' - '$E_precm' ) / '$E_precm'  * 100 )}')
+				echo "$m:" $dEfirst $dEprec $perc_change | \
+				       		awk '{printf "%4s %14s %10s %11s\n", $1, $2, $3, $4}' 
+				E_precm=$E_currm
+                	done
+			printf "\n"
                 	exit	
 		elif [ $CurrStr == "--LastEnergy" ] || [ $CurrStr == "-EL" ]; then
                         Printf "print last computed energy\n\n"
@@ -1222,6 +1236,8 @@ done
 #Graphic
 
 GetOutputFile	#it does what it says
+
+CheckInputErrors 
 
 GetNumberOfAtoms
 
