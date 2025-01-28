@@ -2,6 +2,7 @@
 
 Hartree=0
 eV=0
+kJmol=0
 ZPE=0
 Gibbs=0
 Enthalpy=0
@@ -14,15 +15,25 @@ ConcCorrection=0
 MuteMode=0
 SuperMuteMode=0
 CustTemp=0
+GetTemp=0
+Prec=6
+GetPrec=0
+Conc=0
+GetDiv=0
+PrintUnit=0
+re='^[0-9]+([.][0-9]+)?$'
 
 GaussianCalc=0
 ORCACalc=0
 VaspCalc=0
 
 kH=627.50947407
+kJ=262.54996395
 keV=27.211386246
 eV_to_Ha=0.0367493222
-
+R=8.31446262 #J/molK
+Rkcal=0.00198720426 #kcal/molK
+DGconc=1.894328445 #kcal/mol
 
 if [ -z "$1" ] || [ "$1" == "-h" ]; then
         printf "\nReturn the last energy of a Gaussian or a ORCA outputfile. Use:\n\n"
@@ -31,16 +42,20 @@ if [ -z "$1" ] || [ "$1" == "-h" ]; then
 	printf " [none]\t\t\t- Print last electronic energy (E) in kcal/mol\n"
         printf " -m/--mute\t\t- Mute mode: do not print errors, but symbols in case something goes wrong\n"
 	printf " -M/--supermute\t\t- do not print errors NOR symbols in case something goes wrong (use it with caution!)\n\n"
+	printf " -f/--prec\t\t- floating point precision\n\n"
 	printf " -a/--hartree\t\t- print energy in Hartree\n"
-	printf " --eV\t\t\t- print energy in eV\n\n"
+	printf " -e/--eV\t\t- print energy in eV\n"
+	printf " -J/--kJmol\t\t- print energy in kJ/mol\n"
 	printf " -z/--zpe\t\t- print E + ZPE\n"
-	printf " -h/--enthalpy\t\t- print enthalpy (E + H)\n"
-	printf " -g/--gibbs\t\t- print Gibbs free energy (E + G_corr). Print an error if not available\n"
+	printf " -H/--enthalpy\t\t- print enthalpy (E + H)\n"
+	printf " -G/-g/--gibbs\t\t- print Gibbs free energy (E + G_corr). Print an error if not available\n"
 	printf " -c/--gcorr\t\t- print thermal correction to Gibbs free energy (G_corr)\n"
 	printf " -q/--quasiharmonic\t- print quasi-harmonic Gibbs free energy. It needs goodvibes python package\n"
-	printf " -T [integer]\t\t- (after -q) specifies temperature\n\n"
+	printf " -C/--conc [float/int]\t- concentration correction in Molar. Default is 298.15K = 1.894...\n"
+	printf " -T [float/int]\t\t- (after -q) specifies temperature\n"
 	printf " -A/--per-atom\t\t- divide the final output by number of atoms\n"
-	printf " -d/--div [integer]\t- divide the final output by integer\n\n"
+	printf " -d/--div [float/int]\t- divide the final output by integer\n"
+	printf " -u/--print-unit\t- print unit after value\n"
 	
         printf "\n"
 	exit
@@ -48,12 +63,15 @@ fi
 
 String=$(echo $*)
 
+
 re='^[0-9]+$'
 for i in $String; do
         if [ $i == "-a" ] || [ $i == "--hartree" ]; then
                 Hartree=1
-	elif [ $i == "--eV" ]; then
+	elif [ $i == "-e" ] || [ $i == "--eV" ]; then
 		eV=1
+	elif [ $i == "-J" ] || [ $i == "--kJmol" ]; then
+		kJmol=1
         elif [ $i == "-z" ] || [ $i == "--zpe" ]; then
                 ZPE=1
 	elif [ $i == "-g" ] || [ $i == "-G" ] || [ $i == "--gibbs" ]; then
@@ -65,13 +83,18 @@ for i in $String; do
 	elif [ $(echo $i | grep ".out\|.log") ]; then
        		filename=$i
 	elif [ $i == "-d" ] || [ $i == "--div" ]; then
-		 PerUnit=1
-	 elif [ $i == "-A" ] || [ $i == "--per-atom" ]; then
-                 PerAtom=1
-	elif [ $PerUnit -eq 1 ] && [[ $i =~ $re ]]; then
+		GetDiv=1
+		PerUnit=1
+	elif [ $GetDiv -eq 1 ] && [[ $i =~ $re ]]; then
 		Units=$i
-	elif [ $i == "-C" ] || [ $i == "--conccorr" ]; then
+		GetDiv=0
+	elif [ $i == "-A" ] || [ $i == "--per-atom" ]; then
+                 PerAtom=1
+	elif [ $i == "-C" ] || [ $i == "--conc" ]; then
 		ConcCorrection=1
+	elif [ $ConcCorrection -eq 1 ] && [[ $i =~ $re ]]; then
+		Conc=$i
+		ConcCorrection=0
 	elif [ $i == "-m" ] || [ $i == "--mute" ]; then
 		MuteMode=1
 	elif [ $i == "-M" ] || [ $i == "--supermute" ]; then
@@ -81,17 +104,27 @@ for i in $String; do
 		Gibbs=1
 		QH=1
 	elif [ $i == "-T" ]; then
-		CustTemp=1
-	elif [ $CustTemp -eq 1 ] && [[ $i =~ $re ]]; then
+		GetTemp=1
+	elif [ $GetTemp -eq 1 ] && [[ $i =~ $re ]]; then
 		Temp=$i
+		GetTemp=0
+		CustTemp=1
+	elif [ $i == "-f" ]; then
+		GetPrec=1
+        elif [ $GetPrec -eq 1 ] && [[ $i =~ $re ]]; then
+                Prec=$i
+		GetPrec=0
 	elif [ $(echo $i | grep "OUTCAR") ]; then
 		filename=$i
 		VaspCalc=1
+	elif [ $i == "-u" ] || [ $i == "--print-unit" ]; then
+		PrintUnit=1
 	else 
 		echo "Can't understand $i"
 		exit
         fi
 done
+
 
 if [ $PerUnit -eq 1 ] && [ $Units -eq 0 ]; then
 	echo "Error: enter the number of units after div: LastEnergy Filename div [n] "
@@ -113,6 +146,14 @@ elif [ ! -e $filename ]; then
 	fi
 	exit
 fi
+
+
+cat $filename > lastenergy.tmp.log
+
+currfile=$filename
+filename="lastenergy.tmp.log"
+
+
 
 if [ "$(head $filename | grep "Gaussian, Inc.")" ]; then
 	GaussianCalc=1
@@ -150,7 +191,7 @@ if [ $GaussianCalc -eq 1 ]; then
 			HartreeEnergy=$(grep "E(B2PLYP" $filename | tail -1 | awk '{print $6}' | sed 's/D/E/' | awk '{printf "%.9f\n", $0}')
 		elif [ "$(grep "EUMP2=" $filename)" ]; then
 			HartreeEnergy=$(grep "EUMP2=" $filename | tail -1 | awk '{print $4}' | sed 's/D/E/' | awk '{printf "%.9f\n", $0}')
-		elif [ -z "$(grep "E(" $filename | grep "MP")" ]; then
+		elif [ -z "$(grep "E(" $filename | grep "MP")" ] && [ "$(grep "SCF Done:" $filename)" ]; then
                         HartreeEnergy=$(grep "SCF Done:" $filename | tail -1 | awk '{print $5}')
 		else
 			echo "Method unknown"
@@ -165,17 +206,21 @@ elif [ $ORCACalc -eq 1 ]; then
         elif [ $ZPE -eq 1 ]; then
                 RawHartreeEnergy=$(grep "FINAL SINGLE POINT ENERGY" $filename | awk 'END{print $5}')
                 ZPECorrection=$(grep "Non-thermal (ZPE) correction" $filename | awk '{print $4}')
-                HartreeEnergy=$(awk 'BEGIN{printf ( "%.6f\n", '$ZPECorrection' + '$RawHartreeEnergy' )}')
+                HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$ZPECorrection' + '$RawHartreeEnergy' )}')
         elif [ $GibbsCorr -eq 1 ]; then
                 HartreeEnergy=$(awk '/G-E\(el)/{print $3}' $filename)
         else
                 HartreeEnergy=$(grep "FINAL SINGLE POINT ENERGY" $filename | awk 'END{print $5}')
         fi
 elif [ $VaspCalc -eq 1 ]; then
-	HartreeEnergy=$(grep "free  energy   TOTEN" $filename | awk 'END{print $5*'$eV_to_Ha'}')
+	HartreeEnergy=$(grep "energy(sigma->0)" $filename | awk 'END{printf "%.9f\n", $7*'$eV_to_Ha'}')
+	if (( $(echo "$HartreeEnergy == 0.00" |bc -l) )); then
+		HartreeEnergy=$(grep "free  energy   TOTEN" $filename | awk 'END{printf "%.9f\n", $5*'$eV_to_Ha'}')
+	fi
 fi
 
-if [ -z $HartreeEnergy ] || (( $(echo "$HartreeEnergy == 0.00" |bc -l) )); then
+
+if [ -z $HartreeEnergy ] || ( [ $GaussianCalc -eq 1 ] && (( $(echo "$HartreeEnergy == 0.00" |bc -l) )) && [ $(grep "alpha electrons" $filename | awk 'FNR==1{print $1*2}') -ne 0 ] ); then
 	if [ $MuteMode -eq 0 ]; then
                 echo "Something went wrong!"
         elif [ $SuperMuteMode -eq 0 ]; then
@@ -183,6 +228,7 @@ if [ -z $HartreeEnergy ] || (( $(echo "$HartreeEnergy == 0.00" |bc -l) )); then
         fi
 	exit 
 fi
+
 
 if [ $PerUnit -eq 1 ] && [ $Units -gt 0 ]; then
 	HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$HartreeEnergy' / '$Units'  )}') 
@@ -195,20 +241,42 @@ elif [ $PerAtom -eq 1 ]; then
 	HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$HartreeEnergy' / '$NAtoms'  )}')
 fi
 
-if [ $ConcCorrection -eq 1 ]; then
+
+if (( $(echo "$Conc != 0" |bc -l) )); then
 	if [ $Gibbs -eq 0 ]; then
-		echo "Error: standard state correction valid only with Gibbs free energy"
+		echo "Error: concentration correction is valid only for Gibbs free energy"
 		exit
+	elif [ $CustTemp -eq 1 ]; then
+		DGconc=$(awk 'BEGIN{printf ( "%.9f\n", '$Rkcal' * '$Temp' * log( ( '$R' * '$Temp' ) / 101.325 )   )}')
+		HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$HartreeEnergy' + ( '$DGconc' / '$kH' ) )}')
 	else	
-		HartreeEnergy=$(awk 'BEGIN{printf ( "%.6f\n", '$HartreeEnergy' + ( 1.8943258 / '$kH' ) )}')
+		HartreeEnergy=$(awk 'BEGIN{printf ( "%.9f\n", '$HartreeEnergy' + ( '$DGconc' / '$kH' ) )}')
 	fi
 fi
 
+
 if [ $Hartree -eq 1 ]; then
-        echo $HartreeEnergy
+	printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$HartreeEnergy' )}')"
 elif [ $eV -eq 1 ]; then
-	echo "$(awk 'BEGIN{printf ( "%.6f\n", '$HartreeEnergy' * '$keV'  )}')"
+	printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$HartreeEnergy' * '$keV'  )}')"
+elif [ $kJmol -eq 1 ]; then
+	printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$HartreeEnergy' * '$kJ'  )}')"
 else
-        echo "$(awk 'BEGIN{printf ( "%.6f\n", '$HartreeEnergy' * '$kH'  )}')"
+        printf -- "$(awk 'BEGIN{printf ( "%.'$Prec'f\n", '$HartreeEnergy' * '$kH'  )}')"
 fi
 
+if [ $PrintUnit -eq 1 ]; then
+	if [ $Hartree -eq 1 ]; then
+		echo " Ha"
+	elif [ $eV -eq 1 ]; then
+		echo " eV"
+	elif [ $kJmol -eq 1 ]; then
+		echo " kJ/mol"
+	else
+		echo " kcal/mol"
+	fi
+else
+	echo ""
+fi
+
+rm lastenergy.tmp.log
