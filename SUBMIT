@@ -682,9 +682,9 @@ sed -i 's/JBNAME/'$JobName'/' submitter.tmp
 sed -i 's/JBMEMORY/'$Memory'G/' submitter.tmp
 #sed -i 's/JBCPUMEMORY/'$MemoryPerCPU'/' submitter.tmp
 
-if [ $Cluster == "vera" ]; then
-	sed -i 's/vera/vera --cpus-per-task=2/' submitter.tmp
-fi
+#if [ $Cluster == "vera" ]; then
+#	sed -i 's/vera/vera --cpus-per-task=2/' submitter.tmp
+#fi
 
 
 if [ $ProgramToRun == "orca" ]; then
